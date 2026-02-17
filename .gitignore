@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config
+config.json
+*.cfg
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Test files
+test_*.py
+*_test.py
+
+# User-specific
+.config/
+
+# Temporary
+*.tmp

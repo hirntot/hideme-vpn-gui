@@ -1,0 +1,32 @@
+/* Hide.me VPN - Allow users to manage hide.me systemd services without password */
+
+// Erlaube pkexec für systemctl-Befehle die hide.me services betreffen
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.policykit.exec" &&
+        subject.isInGroup("sudo")) {
+        
+        var program = action.lookup("program");
+        var commandLine = action.lookup("command_line");
+        
+        // Erlaube systemctl für hide.me@*.service
+        if (program == "/usr/bin/systemctl" || program == "/bin/systemctl") {
+            if (commandLine && commandLine.match(/hide\.me@\w+/)) {
+                return polkit.Result.YES;
+            }
+        }
+    }
+});
+
+// Erlaube direkte systemd-Operationen auf hide.me services
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.isInGroup("sudo") &&
+        action.lookup("unit").match(/^hide\.me@.+\.service$/)) {
+        
+        var verb = action.lookup("verb");
+        if (verb == "start" || verb == "stop" || verb == "restart" || 
+            verb == "reload" || verb == "enable" || verb == "disable") {
+            return polkit.Result.YES;
+        }
+    }
+});
