@@ -22,11 +22,69 @@ echo
 if [ ! -f /opt/hide.me/hide.me ]; then
     echo "❌ hide.me CLI ist nicht installiert!"
     echo
-    echo "Bitte zuerst hide.me CLI installieren:"
-    echo "1. Download von https://hide.me/en/software/linux"
-    echo "2. Entpacken und sudo ./install.sh ausführen"
+    echo "Soll hide.me CLI jetzt automatisch installiert werden?"
+    echo "Download: https://hide.me/download/linux-amd64"
     echo
-    exit 1
+    read -p "Hide.me CLI jetzt installieren? (j/n) " -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[JjYy]$ ]]; then
+        echo "Lade hide.me CLI herunter und installiere..."
+        
+        # Erstelle temporäres Verzeichnis
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR"
+        
+        # Download und Extraktion
+        if curl -L https://hide.me/download/linux-amd64 | tar -xz; then
+            echo "✓ Download erfolgreich"
+            
+            # Installiere hide.me CLI
+            if [ -f ./install.sh ]; then
+                chmod +x ./install.sh
+                ./install.sh
+                
+                if [ $? -eq 0 ]; then
+                    echo "✓ hide.me CLI installiert"
+                else
+                    echo "❌ Installation fehlgeschlagen"
+                    cd - > /dev/null
+                    rm -rf "$TEMP_DIR"
+                    exit 1
+                fi
+            else
+                echo "❌ install.sh nicht gefunden im Archiv"
+                cd - > /dev/null
+                rm -rf "$TEMP_DIR"
+                exit 1
+            fi
+        else
+            echo "❌ Download fehlgeschlagen"
+            cd - > /dev/null
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
+        
+        # Zurück zum Original-Verzeichnis und aufräumen
+        cd - > /dev/null
+        rm -rf "$TEMP_DIR"
+        
+        echo
+        echo "⚠️  WICHTIG: Hide.me CLI muss noch konfiguriert werden, falls Sie nicht gerde Zugangsdaten eingegeben haben!"
+        echo "Bitte führe aus: sudo /opt/hide.me/hide.me token free.hideservers.net"
+        echo "Zugangsdaten eingeben, dann GUI-Installation fortsetzen."
+        echo
+        read -p "Konfiguration abgeschlossen? Enter zum Fortfahren..."
+        
+    else
+        echo
+        echo "Installation abgebrochen."
+        echo "Bitte installiere hide.me CLI manuell:"
+        echo "1. Download: https://hide.me/en/software/linux"
+        echo "2. Entpacken und sudo ./install.sh ausführen"
+        echo
+        exit 1
+    fi
 fi
 
 echo "✓ hide.me CLI gefunden"

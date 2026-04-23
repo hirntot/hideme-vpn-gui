@@ -5,6 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
 
+![Hide.me VPN Tray Screenshot](screenshot-hideme-tray-main.png)
+
 ## ⚠️ Disclaimer
 
 **This is an unofficial GUI for the hide.me VPN CLI - use at your own risk!**
@@ -19,7 +21,13 @@
 - **System Tray Integration**: AppIndicator3 with StatusIcon fallback
 - **One-Click Connection**: Connect/disconnect with a single click
 - **Dynamic Server List**: Fetches latest servers from hide.me/de/network at startup
-- **Server Selection Dialog**: Browse and select from worldwide VPN servers
+- **Offline Server Cache**: Persisted server list for no-internet scenarios
+- **Server Selection Dialog**: Browse and select servers even when already connected
+- **Per-Server Latency**: Ping shown next to each server entry in the dialog
+- **Best Location**: Auto-select fastest reachable server
+- **Favorites Menu**: Save commonly used servers for quick reconnect
+- **Emergency Reset Everywhere**: Available in menu, dialog, and CLI (`--emergency-reset`)
+- **Update Check on Startup**: Background GitHub release/tag check
 - **Live Status Display**: Visual connection status in icon and tooltip
 - **Desktop Notifications**: Connection feedback via libnotify
 - **Password-Free Control**: PolicyKit integration for sudo group members
@@ -74,6 +82,16 @@ hideme-vpn-gui
 - **Connect**: Select server and click connect
 - **Disconnect**: Click disconnect in menu
 - **Change server**: Select from list, automatically reconnects if active
+- **Best location**: Connect using lowest-latency server
+- **Favorites**: Add/remove current server in tray menu
+- **Emergency reset**: Trigger directly from tray/dialog
+
+### Command Line Helpers
+
+```bash
+# Emergency reset from anywhere
+hideme-vpn-gui --emergency-reset
+```
 
 ## 🛠️ Included Files
 
@@ -102,7 +120,10 @@ groups
 ### Network issues after VPN
 
 ```bash
-# Run emergency reset
+# Run emergency reset from anywhere
+hideme-vpn-gui --emergency-reset
+
+# Or run standalone script
 sudo ./hideme-emergency-reset.sh
 ```
 
@@ -131,6 +152,8 @@ sudo apt install gir1.2-appindicator3-0.1
 - **VPN Control**: systemctl + hide.me CLI (`hide.me@SERVER.service`)
 - **Privilege Escalation**: PolicyKit (pkexec) - no password prompts for sudo group
 - **Server Discovery**: Parses hide.me/de/network website at startup
+- **Server Fallback**: Cached online server list stored in user config
+- **Version Check**: GitHub API check in non-blocking startup thread
 - **Threading**: Non-blocking UI operations
 
 ## 🗑️ Uninstallation
@@ -149,6 +172,7 @@ Copyright © 2025-2026 [RechnerLotsen](https://rechnerlotsen.com)
 
 **Developed by**: RechnerLotsen  
 **Based on**: [hide.me VPN CLI](https://hide.me)
+**AI workflow**: Built iteratively with Cursor
 
 ## 📚 Documentation
 

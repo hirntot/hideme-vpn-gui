@@ -4,6 +4,9 @@ Hide.me VPN Notification Bar / System Tray GUI
 Benutzerfreundliche GUI für hide.me CLI VPN
 """
 
+__version__ = "1.0.0"
+GITHUB_REPO = "hirntot/hideme-vpn-gui"
+
 import gi
 gi.require_version('Gtk', '3.0')
 
@@ -32,9 +35,11 @@ import subprocess
 import os
 import sys
 import json
+import argparse
 import threading
 import time
 import urllib.request
+import urllib.error
 import re
 from html.parser import HTMLParser
 
@@ -48,6 +53,8 @@ class HideMeVPN:
     def __init__(self):
         self.connected = False
         self.current_server = None
+        self.favorite_servers = []
+        self.cached_servers = []
         self.load_config()
     
     def load_config(self):
@@ -58,15 +65,27 @@ class HideMeVPN:
                 with open(self.CONFIG_FILE, 'r') as f:
                     config = json.load(f)
                     self.current_server = config.get('last_server', 'nl')
+                    self.favorite_servers = config.get('favorite_servers', [])
+                    if not isinstance(self.favorite_servers, list):
+                        self.favorite_servers = []
+                    self.cached_servers = config.get('cached_servers', [])
+                    if not isinstance(self.cached_servers, list):
+                        self.cached_servers = []
         except Exception as e:
             print(f"Config laden fehlgeschlagen: {e}")
             self.current_server = 'nl'
+            self.favorite_servers = []
+            self.cached_servers = []
     
     def save_config(self):
         """Speichert aktuelle Konfiguration"""
         try:
             with open(self.CONFIG_FILE, 'w') as f:
-                json.dump({'last_server': self.current_server}, f)
+                json.dump({
+                    'last_server': self.current_server,
+                    'favorite_servers': self.favorite_servers,
+                    'cached_servers': self.cached_servers
+                }, f)
         except Exception as e:
             print(f"Config speichern fehlgeschlagen: {e}")
     
@@ -133,6 +152,47 @@ class HideMeVPN:
             return False, f"Trennung fehlgeschlagen: {e}"
         except Exception as e:
             return False, f"Fehler: {e}"
+
+    def emergency_reset(self):
+        """Setzt hide.me VPN-Reste im System zurück (Notfall-Reset)."""
+        reset_script = r'''
+set +e
+ACTIVE_SERVICES=$(systemctl list-units --type=service --state=active 'hide.me@*' --no-legend | awk '{print $1}')
+if [ -n "$ACTIVE_SERVICES" ]; then
+    for service in $ACTIVE_SERVICES; do
+        systemctl stop "$service" 2>/dev/null
+        systemctl disable "$service" 2>/dev/null
+    done
+fi
+ip rule del table 55555 2>/dev/null
+ip -6 rule del table 55555 2>/dev/null
+ip route flush table 55555 2>/dev/null
+ip -6 route flush table 55555 2>/dev/null
+if ip link show vpn >/dev/null 2>&1; then
+    ip link delete vpn 2>/dev/null
+fi
+if [ -f /etc/resolv.conf.hide.me.backup ]; then
+    cp /etc/resolv.conf.hide.me.backup /etc/resolv.conf 2>/dev/null
+fi
+if command -v iptables >/dev/null 2>&1; then
+    iptables -t mangle -F 2>/dev/null
+fi
+if command -v ip6tables >/dev/null 2>&1; then
+    ip6tables -t mangle -F 2>/dev/null
+fi
+'''
+        try:
+            subprocess.run(
+                ['pkexec', 'bash', '-c', reset_script],
+                check=True,
+                timeout=90
+            )
+            self.connected = False
+            return True, "Notfall-Reset abgeschlossen. Netzwerk wurde zurückgesetzt."
+        except subprocess.CalledProcessError as e:
+            return False, f"Notfall-Reset fehlgeschlagen: {e}"
+        except Exception as e:
+            return False, f"Fehler beim Notfall-Reset: {e}"
     
     def get_servers(self):
         """Liste verfügbarer Server/Regionen (Fallback)"""
@@ -153,6 +213,31 @@ class HideMeVPN:
             'jp': 'Japan',
             'sg': 'Singapur',
         }
+
+    def add_favorite_server(self, server_code):
+        """Fügt Server zu Favoriten hinzu."""
+        if server_code not in self.get_servers():
+            return False, f"Unbekannter Server: {server_code}"
+        if server_code in self.favorite_servers:
+            return False, f"{server_code} ist bereits in den Favoriten"
+        self.favorite_servers.append(server_code)
+        self.save_config()
+        return True, f"{server_code} zu Favoriten hinzugefügt"
+
+    def remove_favorite_server(self, server_code):
+        """Entfernt Server aus Favoriten."""
+        if server_code not in self.favorite_servers:
+            return False, f"{server_code} ist nicht in den Favoriten"
+        self.favorite_servers.remove(server_code)
+        self.save_config()
+        return True, f"{server_code} aus Favoriten entfernt"
+
+    def set_cached_servers(self, servers):
+        """Speichert online geladene Serverliste dauerhaft für Offline-Fallback."""
+        if not isinstance(servers, list):
+            return
+        self.cached_servers = servers
+        self.save_config()
     
     def fetch_servers_from_website(self):
         """Lädt aktuelle Server-Liste von hide.me Website"""
@@ -194,7 +279,9 @@ class HideMeIndicator:
     
     def __init__(self):
         self.vpn = HideMeVPN()
-        self.cached_servers = None  # Cache für Server-Liste
+        self.cached_servers = self.vpn.cached_servers or []  # Persistenter Cache
+        self.server_ping_cache = {}
+        self.status_dialog = None
         
         # Prüfe Installation
         if not self.vpn.is_installed():
@@ -224,6 +311,8 @@ class HideMeIndicator:
         
         # Lade Server-Liste im Hintergrund (einmalig beim Start)
         self._load_servers_background()
+        # Prüfe im Hintergrund auf neuere Version auf GitHub
+        self._check_updates_background()
     
     def _init_appindicator(self):
         """Initialisiert AppIndicator3"""
@@ -252,11 +341,77 @@ class HideMeIndicator:
             servers = self.vpn.fetch_servers_from_website()
             if servers:
                 self.cached_servers = servers
+                self.vpn.set_cached_servers(servers)
                 print(f"✓ {len(servers)} Server geladen")
             else:
                 print("⚠️  Server-Liste konnte nicht geladen werden - verwende Fallback")
         
         thread = threading.Thread(target=load)
+        thread.daemon = True
+        thread.start()
+
+    def _parse_version_tuple(self, version_text):
+        """Extrahiert numerische Teile einer Version für Vergleich."""
+        nums = re.findall(r'\d+', (version_text or "").strip())
+        if not nums:
+            return (0,)
+        return tuple(int(n) for n in nums)
+
+    def _is_remote_version_newer(self, remote_version, local_version):
+        """Vergleicht zwei Versions-Strings tolerant."""
+        remote = self._parse_version_tuple(remote_version)
+        local = self._parse_version_tuple(local_version)
+        max_len = max(len(remote), len(local))
+        remote += (0,) * (max_len - len(remote))
+        local += (0,) * (max_len - len(local))
+        return remote > local
+
+    def _fetch_latest_github_version(self):
+        """Holt neueste Version (Release/Tag) von GitHub."""
+        headers = {'User-Agent': 'hideme-vpn-gui-update-check'}
+
+        # 1) Bevorzugt Releases
+        release_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        try:
+            req = urllib.request.Request(release_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                tag = data.get('tag_name')
+                if tag:
+                    return tag
+        except urllib.error.HTTPError as e:
+            # 404 ist ok: Repo nutzt evtl. keine Releases
+            if e.code != 404:
+                raise
+
+        # 2) Fallback auf Tags
+        tags_url = f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=1"
+        req = urllib.request.Request(tags_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            tags = json.loads(response.read().decode('utf-8'))
+            if tags and isinstance(tags, list):
+                return tags[0].get('name')
+        return None
+
+    def _check_updates_background(self):
+        """Prüft beim Start asynchron, ob eine neuere Version verfügbar ist."""
+        def run():
+            try:
+                latest = self._fetch_latest_github_version()
+                if not latest:
+                    return
+                if self._is_remote_version_newer(latest, __version__):
+                    GLib.idle_add(
+                        self.show_notification,
+                        "Hide.me VPN Update verfügbar",
+                        f"Neue Version gefunden: {latest} (installiert: {__version__})",
+                        "system-software-update"
+                    )
+            except Exception as e:
+                # Update-Check darf niemals die App-Funktion beeinträchtigen.
+                print(f"Update-Check übersprungen: {e}")
+
+        thread = threading.Thread(target=run)
         thread.daemon = True
         thread.start()
     
@@ -282,7 +437,17 @@ class HideMeIndicator:
         self.toggle_item = Gtk.MenuItem(label="Verbinden")
         self.toggle_item.connect("activate", self.on_toggle_connection)
         menu.append(self.toggle_item)
+
+        # Best Location
+        best_item = Gtk.MenuItem(label="Mit bestem Server verbinden")
+        best_item.connect("activate", lambda w: self.on_connect_best_server())
+        menu.append(best_item)
         
+        # Notfall-Reset (immer verfügbar)
+        self.reset_item = Gtk.MenuItem(label="Verbindung zurücksetzen (Notfall)")
+        self.reset_item.connect("activate", lambda w: self.confirm_and_reset())
+        menu.append(self.reset_item)
+
         menu.append(Gtk.SeparatorMenuItem())
         
         # Server-Auswahl Untermenü
@@ -296,6 +461,34 @@ class HideMeIndicator:
         
         server_item.set_submenu(server_menu)
         menu.append(server_item)
+
+        # Favoriten-Untermenü
+        favorites_item = Gtk.MenuItem(label="Favoriten")
+        favorites_menu = Gtk.Menu()
+
+        if self.vpn.favorite_servers:
+            for code in self.vpn.favorite_servers:
+                name = self.vpn.get_servers().get(code, code)
+                item = Gtk.MenuItem(label=f"{name} ({code})")
+                item.connect("activate", self.on_select_server, code)
+                favorites_menu.append(item)
+        else:
+            no_fav_item = Gtk.MenuItem(label="(keine Favoriten)")
+            no_fav_item.set_sensitive(False)
+            favorites_menu.append(no_fav_item)
+
+        favorites_menu.append(Gtk.SeparatorMenuItem())
+
+        add_current_item = Gtk.MenuItem(label="Aktuellen Server zu Favoriten")
+        add_current_item.connect("activate", lambda w: self.on_add_current_favorite())
+        favorites_menu.append(add_current_item)
+
+        remove_current_item = Gtk.MenuItem(label="Aktuellen Server aus Favoriten")
+        remove_current_item.connect("activate", lambda w: self.on_remove_current_favorite())
+        favorites_menu.append(remove_current_item)
+
+        favorites_item.set_submenu(favorites_menu)
+        menu.append(favorites_item)
         
         # Aktueller Server
         self.current_server_item = Gtk.MenuItem(
@@ -322,6 +515,11 @@ class HideMeIndicator:
             self.indicator.set_menu(menu)
         else:
             self.menu = menu
+
+    def refresh_menu(self):
+        """Baut Menü neu auf, z.B. nach Favoriten-Änderung."""
+        self.build_menu()
+        self.update_status()
     
     def on_statusicon_popup(self, icon, button, time):
         """Zeigt Menü bei Rechtsklick auf StatusIcon"""
@@ -386,6 +584,87 @@ class HideMeIndicator:
         thread = threading.Thread(target=do_toggle)
         thread.daemon = True
         thread.start()
+
+    def ping_server_ms(self, server_code):
+        """Misst Ping für hide.me Server und gibt ms zurück."""
+        try:
+            result = subprocess.run(
+                ['ping', '-c', '1', '-W', '1', f'{server_code}.hideservers.net'],
+                capture_output=True,
+                text=True,
+                timeout=3
+            )
+            if result.returncode != 0:
+                return None
+            match = re.search(r'time=([\d\.]+)\s*ms', result.stdout)
+            if not match:
+                return None
+            return float(match.group(1))
+        except Exception:
+            return None
+
+    def ping_servers_background(self, servers, update_callback=None):
+        """Misst Pings für gegebene Server im Hintergrund."""
+        def run():
+            for server in servers:
+                code = server.get('code')
+                if not code:
+                    continue
+                ping = self.ping_server_ms(code)
+                if ping is not None:
+                    self.server_ping_cache[code] = ping
+                if update_callback:
+                    GLib.idle_add(update_callback, code, ping)
+
+        thread = threading.Thread(target=run)
+        thread.daemon = True
+        thread.start()
+
+    def find_best_server(self):
+        """Findet Server mit bestem Ping."""
+        best_code = None
+        best_ping = None
+        for code in self.vpn.get_servers().keys():
+            ping = self.ping_server_ms(code)
+            if ping is None:
+                continue
+            if best_ping is None or ping < best_ping:
+                best_ping = ping
+                best_code = code
+        return best_code, best_ping
+
+    def on_connect_best_server(self):
+        """Verbindet mit dem Server mit dem besten Ping."""
+        def connect_best():
+            best_code, best_ping = self.find_best_server()
+            if not best_code:
+                GLib.idle_add(
+                    self.show_notification,
+                    "Hide.me VPN",
+                    "Kein erreichbarer Server für Best Location gefunden",
+                    "dialog-error"
+                )
+                return
+
+            if self.vpn.connected:
+                self.vpn.disconnect()
+                time.sleep(1)
+
+            success, message = self.vpn.connect(best_code)
+            if success:
+                message = f"{message} (Ping {best_ping:.0f} ms)"
+
+            GLib.idle_add(
+                self.show_notification,
+                "Hide.me VPN",
+                message,
+                "network-vpn" if success else "dialog-error"
+            )
+            GLib.idle_add(self.update_status)
+
+        thread = threading.Thread(target=connect_best)
+        thread.daemon = True
+        thread.start()
     
     def on_select_server(self, widget, server_code):
         """Wählt einen Server aus"""
@@ -414,6 +693,63 @@ class HideMeIndicator:
                 f"Server gewechselt zu {server_code}",
                 "network-vpn"
             )
+
+    def on_add_current_favorite(self):
+        """Fügt aktuellen Server zu Favoriten hinzu."""
+        success, message = self.vpn.add_favorite_server(self.vpn.current_server)
+        self.show_notification(
+            "Hide.me VPN",
+            message,
+            "network-vpn" if success else "dialog-warning"
+        )
+        if success:
+            self.refresh_menu()
+
+    def on_remove_current_favorite(self):
+        """Entfernt aktuellen Server aus Favoriten."""
+        success, message = self.vpn.remove_favorite_server(self.vpn.current_server)
+        self.show_notification(
+            "Hide.me VPN",
+            message,
+            "network-vpn" if success else "dialog-warning"
+        )
+        if success:
+            self.refresh_menu()
+
+    def confirm_and_reset(self, parent_dialog=None):
+        """Fragt Bestätigung ab und führt Notfall-Reset aus."""
+        confirm_dialog = Gtk.MessageDialog(
+            transient_for=parent_dialog,
+            flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Verbindung wirklich zurücksetzen?"
+        )
+        confirm_dialog.format_secondary_text(
+            "Der Notfall-Reset stoppt alle hide.me Dienste und setzt Routing/DNS zurück."
+        )
+        response = confirm_dialog.run()
+        confirm_dialog.destroy()
+
+        if response != Gtk.ResponseType.YES:
+            return
+
+        if parent_dialog:
+            parent_dialog.destroy()
+
+        def do_reset():
+            success, message = self.vpn.emergency_reset()
+            GLib.idle_add(
+                self.show_notification,
+                "Hide.me VPN",
+                message,
+                "network-vpn" if success else "dialog-error"
+            )
+            GLib.idle_add(self.update_status)
+
+        thread = threading.Thread(target=do_reset)
+        thread.daemon = True
+        thread.start()
     
     def show_notification(self, title, message, icon="network-vpn"):
         """Zeigt Desktop-Benachrichtigung"""
@@ -429,22 +765,21 @@ class HideMeIndicator:
     
     def show_about(self, widget):
         """Zeigt Info-Dialog"""
-        dialog = Gtk.MessageDialog(
-            transient_for=None,
-            flags=0,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text="Hide.me VPN GUI"
-        )
-        dialog.format_secondary_text(
+        dialog = Gtk.AboutDialog()
+        dialog.set_program_name("Hide.me VPN GUI")
+        dialog.set_version(__version__)
+        dialog.set_comments(
             "Benutzerfreundliche GUI für hide.me CLI\n\n"
             "Funktionen:\n"
             "• Einfaches Verbinden/Trennen\n"
             "• Server-Auswahl\n"
             "• Status-Anzeige im System Tray\n"
-            "• Desktop-Benachrichtigungen\n\n"
-            "RechnerLotsen 2025"
+            "• Desktop-Benachrichtigungen"
         )
+        dialog.set_website(f"https://github.com/{GITHUB_REPO}")
+        dialog.set_website_label("GitHub-Projekt öffnen")
+        dialog.set_authors(["RechnerLotsen"])
+        dialog.set_copyright("RechnerLotsen 2025-2026")
         dialog.run()
         dialog.destroy()
     
@@ -463,6 +798,11 @@ class HideMeIndicator:
     
     def show_status_dialog(self):
         """Zeigt VPN-Status und Server-Auswahl Dialog"""
+        # Nur ein Status-Fenster gleichzeitig erlauben
+        if self.status_dialog is not None and self.status_dialog.get_visible():
+            self.status_dialog.present()
+            return
+
         # Status prüfen
         connected = self.vpn.get_status()
         
@@ -472,6 +812,8 @@ class HideMeIndicator:
             flags=0
         )
         dialog.set_default_size(400, 500)
+        dialog.connect("destroy", self.on_status_dialog_destroy)
+        self.status_dialog = dialog
         
         box = dialog.get_content_area()
         box.set_spacing(10)
@@ -493,22 +835,37 @@ class HideMeIndicator:
             disconnect_btn = Gtk.Button(label="Verbindung trennen")
             disconnect_btn.connect("clicked", lambda w: self.disconnect_and_close(dialog))
             box.pack_start(disconnect_btn, False, False, 0)
+
+            # Notfall-Reset
+            reset_btn = Gtk.Button(label="Verbindung zurücksetzen (Notfall)")
+            reset_btn.connect("clicked", lambda w: self.confirm_and_reset(dialog))
+            box.pack_start(reset_btn, False, False, 0)
         else:
             status_label = Gtk.Label()
             status_label.set_markup("<b>✗ Nicht verbunden</b>")
             box.pack_start(status_label, False, False, 0)
-            
-            # Verwende gecachte Server-Liste (beim Start geladen)
-            self.populate_server_list(dialog, box, None, self.cached_servers)
-            
-            dialog.run()
-            dialog.destroy()
-            return
+
+            best_btn = Gtk.Button(label="Mit bestem Server verbinden")
+            best_btn.connect("clicked", lambda w: (dialog.destroy(), self.on_connect_best_server()))
+            box.pack_start(best_btn, False, False, 0)
+
+            # Notfall-Reset auch ohne bestehende Verbindung
+            reset_btn = Gtk.Button(label="Verbindung zurücksetzen (Notfall)")
+            reset_btn.connect("clicked", lambda w: self.confirm_and_reset(dialog))
+            box.pack_start(reset_btn, False, False, 0)
+
+        # Server-Liste immer anzeigen (auch wenn bereits verbunden).
+        self.populate_server_list(dialog, box, None, self.cached_servers)
         
         dialog.add_button("Schließen", Gtk.ResponseType.CLOSE)
         dialog.show_all()
         dialog.run()
         dialog.destroy()
+
+    def on_status_dialog_destroy(self, dialog):
+        """Setzt Referenz beim Schließen des Status-Dialogs zurück."""
+        if self.status_dialog is dialog:
+            self.status_dialog = None
     
     def populate_server_list(self, dialog, box, loading_label, servers):
         """Füllt Dialog mit Server-Liste"""
@@ -548,13 +905,17 @@ class HideMeIndicator:
         
         for server in servers:
             row = Gtk.ListBoxRow()
-            label = Gtk.Label(label=server['display'], xalign=0)
+            code = server.get('code', '')
+            ping = self.server_ping_cache.get(code)
+            ping_text = f" ({int(ping)} ms)" if ping is not None else " (… ms)"
+            label = Gtk.Label(label=f"{server['display']}{ping_text}", xalign=0)
             label.set_margin_start(10)
             label.set_margin_end(10)
             label.set_margin_top(5)
             label.set_margin_bottom(5)
             row.add(label)
             row.server_data = server
+            row.server_label = label
             listbox.add(row)
         
         scrolled.add(listbox)
@@ -567,6 +928,20 @@ class HideMeIndicator:
         
         dialog.add_button("Abbrechen", Gtk.ResponseType.CANCEL)
         dialog.show_all()
+
+        def update_ping_label(server_code, ping):
+            if ping is None:
+                return False
+            for row in listbox.get_children():
+                row_code = row.server_data.get('code')
+                if row_code == server_code:
+                    display = row.server_data.get('display', row_code)
+                    row.server_label.set_text(f"{display} ({int(ping)} ms)")
+                    break
+            return False
+
+        # Ping-Messung live nachladen, damit Latenz neben jedem Server erscheint.
+        self.ping_servers_background(servers, update_callback=update_ping_label)
     
     def connect_selected_server(self, dialog, listbox):
         """Verbindet mit ausgewähltem Server"""
@@ -584,7 +959,18 @@ class HideMeIndicator:
         
         # Verbinde in Thread
         def connect():
-            success, message = self.vpn.connect(server['code'])
+            selected_code = server['code']
+
+            if self.vpn.connected:
+                if selected_code == self.vpn.current_server:
+                    success, message = True, f"Bereits verbunden mit {selected_code}"
+                else:
+                    self.vpn.disconnect()
+                    time.sleep(1)
+                    success, message = self.vpn.connect(selected_code)
+            else:
+                success, message = self.vpn.connect(selected_code)
+
             GLib.idle_add(self.show_notification,
                          "Hide.me VPN",
                          message,
@@ -620,6 +1006,23 @@ class HideMeIndicator:
 
 def main():
     """Hauptfunktion"""
+    parser = argparse.ArgumentParser(description="Hide.me VPN GUI und CLI-Helfer")
+    parser.add_argument(
+        "--emergency-reset",
+        action="store_true",
+        help="Führt Notfall-Reset (Routing/DNS/VPN) per pkexec aus"
+    )
+    args = parser.parse_args()
+
+    if args.emergency_reset:
+        vpn = HideMeVPN()
+        if not vpn.is_installed():
+            print("Hide.me CLI nicht installiert.")
+            sys.exit(1)
+        success, message = vpn.emergency_reset()
+        print(message)
+        sys.exit(0 if success else 1)
+
     # Prüfe benötigte Pakete
     missing = []
     if not HAS_APPINDICATOR:
