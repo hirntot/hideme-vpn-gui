@@ -37,9 +37,10 @@ config.json
 *.backup
 *~
 
-# Test files
+# Local scratch tests (keep the regression suite versioned)
 test_*.py
 *_test.py
+!tests/test_*.py
 
 # User-specific
 .config/

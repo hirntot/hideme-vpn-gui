@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Fix #1: translate GUI, notifications and setup/reset/removal prompts into
+  English, French, Spanish, Italian and Portuguese while retaining German.
+- Detect the system language automatically, with an English fallback and
+  `HIDEME_LANG` override, including regional locale variants.
+- Localize confirmation keys, desktop descriptions and server names; invalidate
+  cached server lists when the language changes.
+- Add regression tests for locale selection, confirmations and translation data.
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).

@@ -1,5 +1,20 @@
 # Hide.me VPN GUI - Benutzerfreundliche Oberfläche
 
+## Sprache
+
+GUI und Hilfsskripte unterstützen Deutsch, Englisch, Französisch, Spanisch,
+Italienisch und Portugiesisch. Die Sprache wird automatisch aus der
+Systemumgebung gewählt; unbekannte Sprachen verwenden Englisch.
+
+Manuelle Auswahl: `HIDEME_LANG=fr hideme-vpn-gui` oder
+`sudo env HIDEME_LANG=en ./hideme-gui-install.sh`.
+Sprachcodes: `de`, `en`, `fr`, `es`, `it`, `pt`.
+Die Auswahl gilt für den jeweiligen Aufruf. Für eine dauerhafte Auswahl
+`HIDEME_LANG` in der Desktop-Sitzung setzen oder den eigenen Autostart-Eintrag
+anpassen. Details und Priorität der Umgebungsvariablen stehen in der
+[englischen README](README.md#interface-language).
+
+
 ## 🎯 Problem gelöst!
 
 Das hide.me CLI ist für normale Nutzer viel zu kompliziert. Diese GUI macht es einfach:

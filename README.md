@@ -20,7 +20,7 @@
 
 - **System Tray Integration**: AppIndicator3 with StatusIcon fallback
 - **One-Click Connection**: Connect/disconnect with a single click
-- **Dynamic Server List**: Fetches latest servers from hide.me/de/network at startup
+- **Dynamic Server List**: Fetches latest servers from the localized hide.me network page at startup
 - **Offline Server Cache**: Persisted server list for no-internet scenarios
 - **Server Selection Dialog**: Browse and select servers even when already connected
 - **Per-Server Latency**: Ping shown next to each server entry in the dialog
@@ -75,6 +75,42 @@ hideme-vpn-gui
 
 **Autostart**: GUI starts automatically on login after installation
 
+### Interface language
+
+The GUI, notifications, installer, uninstaller and emergency reset support:
+**English, German, French, Spanish, Italian and Portuguese**.
+
+The language is selected automatically from `HIDEME_LANG`, `LC_ALL`,
+`LC_MESSAGES`, `LANGUAGE`, then `LANG` (first non-empty value wins).
+Regional variants such as `de_AT`, `fr_CA` and `pt_BR` use their base language.
+For `LANGUAGE`, the first entry is used. Unsupported languages and the `C`
+locale fall back to English. German remains available on German systems.
+
+Override the language for one launch:
+
+```bash
+HIDEME_LANG=en hideme-vpn-gui
+HIDEME_LANG=fr hideme-vpn-gui
+HIDEME_LANG=es python3 ./hideme-notifiy.py
+sudo env HIDEME_LANG=it ./hideme-gui-install.sh
+sudo env HIDEME_LANG=pt ./hideme-gui-uninstall.sh
+sudo env HIDEME_LANG=en ./hideme-emergency-reset.sh
+```
+
+Supported codes: `de`, `en`, `fr`, `es`, `it`, `pt`. To keep an override,
+set `HIDEME_LANG` in your desktop session environment, or change your user
+launcher/autostart entry to `Exec=env HIDEME_LANG=fr /usr/local/bin/hideme-vpn-gui`.
+Restart the GUI after changing the language.
+
+Confirmation prompts accept `j` in German, `y` in English, `o` in French and
+`s` in Spanish, Italian and Portuguese. Uppercase equivalents and `y` are also
+accepted. `n`, empty input and other answers do not confirm an action.
+
+Server names are loaded from the corresponding localized hide.me page. If a
+cached list belongs to another language, the translated built-in list is used
+until a fresh list is available. Messages from external programs (hide.me CLI,
+APT, sudo and PolicyKit) follow those programs' own language support.
+
 ### Controls
 
 - **Left-click icon**: Open status dialog or server selection
@@ -96,7 +132,7 @@ hideme-vpn-gui --emergency-reset
 ## 🛠️ Included Files
 
 ```
-hideme-notifiy.py              # Main GUI application (~650 lines)
+hideme-notifiy.py              # Main GUI application
 hideme-gui-install.sh          # Installation script
 hideme-gui-uninstall.sh        # Uninstallation script
 50-hideme-vpn.rules            # PolicyKit rule
@@ -151,7 +187,7 @@ sudo apt install gir1.2-appindicator3-0.1
 - **Language**: Python 3 with GTK 3.0
 - **VPN Control**: systemctl + hide.me CLI (`hide.me@SERVER.service`)
 - **Privilege Escalation**: PolicyKit (pkexec) - no password prompts for sudo group
-- **Server Discovery**: Parses hide.me/de/network website at startup
+- **Server Discovery**: Parses the localized hide.me network page website at startup
 - **Server Fallback**: Cached online server list stored in user config
 - **Version Check**: GitHub API check in non-blocking startup thread
 - **Threading**: Non-blocking UI operations
@@ -193,3 +229,20 @@ If this saved you from typing VPN commands, consider giving it a star!
 ---
 
 **Made with ❤️ by RechnerLotsen** - Because VPN should be simple!
+
+## Development checks
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m py_compile hideme-notifiy.py
+bash -n hideme-gui-install.sh
+bash -n hideme-gui-uninstall.sh
+bash -n hideme-emergency-reset.sh
+```
+
+Translations are kept at each `tr` call in the fixed order
+German / English / French / Spanish / Italian / Portuguese. This keeps the GUI
+and each shell script standalone, including before dependencies are installed.
+The tests check language selection, translation placeholders, localized
+confirmation keys, country names and cache compatibility without changing VPN
+or system settings.

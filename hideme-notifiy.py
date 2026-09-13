@@ -4,8 +4,34 @@ Hide.me VPN Notification Bar / System Tray GUI
 Benutzerfreundliche GUI für hide.me CLI VPN
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 GITHUB_REPO = "hirntot/hideme-vpn-gui"
+
+import os
+
+
+def detect_language(environ=None):
+    """Select a supported system language, with English as the fallback."""
+    env = os.environ if environ is None else environ
+    for key in ("HIDEME_LANG", "LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"):
+        value = env.get(key)
+        if value:
+            language = value.split(":", 1)[0].split("_", 1)[0].split("-", 1)[0]
+            language = language.split(".", 1)[0].split("@", 1)[0].lower()
+            return language if language in ("de", "en", "fr", "es", "it", "pt") else "en"
+    return "en"
+
+
+LANGUAGE = detect_language()
+# GTK's built-in dialog labels should use the same language as the application.
+os.environ["LANGUAGE"] = LANGUAGE
+
+
+def tr(german, english, french, spanish, italian, portuguese):
+    """Translations are ordered de/en/fr/es/it/pt at every call site."""
+    return {"de": german, "en": english, "fr": french, "es": spanish,
+            "it": italian, "pt": portuguese}.get(LANGUAGE, english)
+
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -17,8 +43,22 @@ try:
     HAS_APPINDICATOR = True
 except (ValueError, ImportError):
     HAS_APPINDICATOR = False
-    print("AppIndicator3 nicht verfügbar - verwende GTK StatusIcon Fallback")
-    print("Für bessere Integration installiere: sudo apt install gir1.2-appindicator3-0.1")
+    print(tr(
+        "AppIndicator3 nicht verfügbar - verwende GTK StatusIcon Fallback",
+        'AppIndicator3 unavailable - using GTK StatusIcon fallback',
+        'AppIndicator3 indisponible - utilisation de GTK StatusIcon',
+        'AppIndicator3 no disponible - se usa GTK StatusIcon',
+        'AppIndicator3 non disponibile - viene usato GTK StatusIcon',
+        'AppIndicator3 indisponível - usando GTK StatusIcon'
+    ))
+    print(tr(
+        "Für bessere Integration installiere: sudo apt install gir1.2-appindicator3-0.1",
+        'For better integration install: sudo apt install gir1.2-appindicator3-0.1',
+        'Pour une meilleure intégration : sudo apt install gir1.2-appindicator3-0.1',
+        'Para una mejor integración: sudo apt install gir1.2-appindicator3-0.1',
+        'Per una migliore integrazione: sudo apt install gir1.2-appindicator3-0.1',
+        'Para melhor integração: sudo apt install gir1.2-appindicator3-0.1'
+    ))
 
 # Versuche Notify zu laden
 try:
@@ -27,12 +67,25 @@ try:
     HAS_NOTIFY = True
 except (ValueError, ImportError):
     HAS_NOTIFY = False
-    print("Notify nicht verfügbar - keine Desktop-Benachrichtigungen")
-    print("Für Benachrichtigungen installiere: sudo apt install gir1.2-notify-0.7")
+    print(tr(
+        "Notify nicht verfügbar - keine Desktop-Benachrichtigungen",
+        'Notify unavailable - desktop notifications disabled',
+        'Notify indisponible - notifications désactivées',
+        'Notify no disponible - notificaciones desactivadas',
+        'Notify non disponibile - notifiche disattivate',
+        'Notify indisponível - notificações desativadas'
+    ))
+    print(tr(
+        "Für Benachrichtigungen installiere: sudo apt install gir1.2-notify-0.7",
+        'For notifications install: sudo apt install gir1.2-notify-0.7',
+        'Pour les notifications : sudo apt install gir1.2-notify-0.7',
+        'Para las notificaciones: sudo apt install gir1.2-notify-0.7',
+        'Per le notifiche: sudo apt install gir1.2-notify-0.7',
+        'Para notificações: sudo apt install gir1.2-notify-0.7'
+    ))
 
 from gi.repository import Gtk, GLib, GdkPixbuf
 import subprocess
-import os
 import sys
 import json
 import argparse
@@ -68,11 +121,20 @@ class HideMeVPN:
                     self.favorite_servers = config.get('favorite_servers', [])
                     if not isinstance(self.favorite_servers, list):
                         self.favorite_servers = []
-                    self.cached_servers = config.get('cached_servers', [])
+                    self.cached_servers = (config.get('cached_servers', [])
+                                           if config.get('cached_servers_language', 'de') == LANGUAGE
+                                           else [])
                     if not isinstance(self.cached_servers, list):
                         self.cached_servers = []
         except Exception as e:
-            print(f"Config laden fehlgeschlagen: {e}")
+            print(tr(
+                f"Config laden fehlgeschlagen: {e}",
+                f'Failed to load configuration: {e}',
+                f'Échec du chargement de la configuration : {e}',
+                f'Error al cargar la configuración: {e}',
+                f'Caricamento della configurazione non riuscito: {e}',
+                f'Falha ao carregar a configuração: {e}'
+            ))
             self.current_server = 'nl'
             self.favorite_servers = []
             self.cached_servers = []
@@ -84,10 +146,18 @@ class HideMeVPN:
                 json.dump({
                     'last_server': self.current_server,
                     'favorite_servers': self.favorite_servers,
-                    'cached_servers': self.cached_servers
+                    'cached_servers': self.cached_servers,
+                    'cached_servers_language': LANGUAGE
                 }, f)
         except Exception as e:
-            print(f"Config speichern fehlgeschlagen: {e}")
+            print(tr(
+                f"Config speichern fehlgeschlagen: {e}",
+                f'Failed to save configuration: {e}',
+                f"Échec de l'enregistrement de la configuration : {e}",
+                f'Error al guardar la configuración: {e}',
+                f'Salvataggio della configurazione non riuscito: {e}',
+                f'Falha ao guardar a configuração: {e}'
+            ))
     
     def is_installed(self):
         """Prüft ob hide.me CLI installiert ist"""
@@ -105,7 +175,14 @@ class HideMeVPN:
             self.connected = (result.stdout.strip() == 'active')
             return self.connected
         except Exception as e:
-            print(f"Status-Check fehlgeschlagen: {e}")
+            print(tr(
+                f"Status-Check fehlgeschlagen: {e}",
+                f'Status check failed: {e}',
+                f"Échec de la vérification de l'état : {e}",
+                f'Error al comprobar el estado: {e}',
+                f'Verifica dello stato non riuscita: {e}',
+                f'Falha ao verificar o estado: {e}'
+            ))
             return False
     
     def connect(self, server=None):
@@ -127,11 +204,32 @@ class HideMeVPN:
                 timeout=30
             )
             self.connected = True
-            return True, f"Verbunden mit {self.current_server}"
+            return True, tr(
+                f"Verbunden mit {self.current_server}",
+                f'Connected to {self.current_server}',
+                f'Connecté à {self.current_server}',
+                f'Conectado a {self.current_server}',
+                f'Connesso a {self.current_server}',
+                f'Ligado a {self.current_server}'
+            )
         except subprocess.CalledProcessError as e:
-            return False, f"Verbindung fehlgeschlagen: {e}"
+            return False, tr(
+                f"Verbindung fehlgeschlagen: {e}",
+                f'Connection failed: {e}',
+                f'Échec de la connexion : {e}',
+                f'Error de conexión: {e}',
+                f'Connessione non riuscita: {e}',
+                f'Falha na ligação: {e}'
+            )
         except Exception as e:
-            return False, f"Fehler: {e}"
+            return False, tr(
+                f"Fehler: {e}",
+                f'Error: {e}',
+                f'Erreur : {e}',
+                f'Error: {e}',
+                f'Errore: {e}',
+                f'Erro: {e}'
+            )
     
     def disconnect(self):
         """Trennt VPN-Verbindung"""
@@ -147,11 +245,32 @@ class HideMeVPN:
                 timeout=30
             )
             self.connected = False
-            return True, "VPN getrennt"
+            return True, tr(
+                "VPN getrennt",
+                'VPN disconnected',
+                'VPN déconnecté',
+                'VPN desconectada',
+                'VPN disconnessa',
+                'VPN desligada'
+            )
         except subprocess.CalledProcessError as e:
-            return False, f"Trennung fehlgeschlagen: {e}"
+            return False, tr(
+                f"Trennung fehlgeschlagen: {e}",
+                f'Disconnect failed: {e}',
+                f'Échec de la déconnexion : {e}',
+                f'Error al desconectar: {e}',
+                f'Disconnessione non riuscita: {e}',
+                f'Falha ao desligar: {e}'
+            )
         except Exception as e:
-            return False, f"Fehler: {e}"
+            return False, tr(
+                f"Fehler: {e}",
+                f'Error: {e}',
+                f'Erreur : {e}',
+                f'Error: {e}',
+                f'Errore: {e}',
+                f'Erro: {e}'
+            )
 
     def emergency_reset(self):
         """Setzt hide.me VPN-Reste im System zurück (Notfall-Reset)."""
@@ -188,49 +307,196 @@ fi
                 timeout=90
             )
             self.connected = False
-            return True, "Notfall-Reset abgeschlossen. Netzwerk wurde zurückgesetzt."
+            return True, tr(
+                "Notfall-Reset abgeschlossen. Netzwerk wurde zurückgesetzt.",
+                'Emergency reset complete. Network settings have been reset.',
+                "Réinitialisation d'urgence terminée. Paramètres réseau réinitialisés.",
+                'Restablecimiento de emergencia completado. Se ha restablecido la configuración de red.',
+                'Ripristino di emergenza completato. Impostazioni di rete ripristinate.',
+                'Reposição de emergência concluída. As definições de rede foram repostas.'
+            )
         except subprocess.CalledProcessError as e:
-            return False, f"Notfall-Reset fehlgeschlagen: {e}"
+            return False, tr(
+                f"Notfall-Reset fehlgeschlagen: {e}",
+                f'Emergency reset failed: {e}',
+                f"Échec de la réinitialisation d'urgence : {e}",
+                f'Error en el restablecimiento de emergencia: {e}',
+                f'Ripristino di emergenza non riuscito: {e}',
+                f'Falha na reposição de emergência: {e}'
+            )
         except Exception as e:
-            return False, f"Fehler beim Notfall-Reset: {e}"
+            return False, tr(
+                f"Fehler beim Notfall-Reset: {e}",
+                f'Emergency reset error: {e}',
+                f"Erreur de réinitialisation d'urgence : {e}",
+                f'Error de restablecimiento de emergencia: {e}',
+                f'Errore nel ripristino di emergenza: {e}',
+                f'Erro na reposição de emergência: {e}'
+            )
     
     def get_servers(self):
         """Liste verfügbarer Server/Regionen (Fallback)"""
         return {
-            'nl': 'Niederlande',
-            'de': 'Deutschland', 
-            'us': 'USA',
-            'gb': 'Großbritannien',
-            'ch': 'Schweiz',
-            'fr': 'Frankreich',
-            'es': 'Spanien',
-            'it': 'Italien',
-            'se': 'Schweden',
-            'no': 'Norwegen',
-            'dk': 'Dänemark',
-            'ca': 'Kanada',
-            'au': 'Australien',
-            'jp': 'Japan',
-            'sg': 'Singapur',
+            'nl': tr(
+                'Niederlande',
+                'Netherlands',
+                'Pays-Bas',
+                'Países Bajos',
+                'Paesi Bassi',
+                'Países Baixos'
+            ),
+            'de': tr(
+                'Deutschland',
+                'Germany',
+                'Allemagne',
+                'Alemania',
+                'Germania',
+                'Alemanha'
+            ),
+            'us': tr('USA', 'USA', 'États-Unis', 'Estados Unidos', 'Stati Uniti', 'Estados Unidos'),
+            'gb': tr(
+                'Großbritannien',
+                'United Kingdom',
+                'Royaume-Uni',
+                'Reino Unido',
+                'Regno Unito',
+                'Reino Unido'
+            ),
+            'ch': tr(
+                'Schweiz',
+                'Switzerland',
+                'Suisse',
+                'Suiza',
+                'Svizzera',
+                'Suíça'
+            ),
+            'fr': tr(
+                'Frankreich',
+                'France',
+                'France',
+                'Francia',
+                'Francia',
+                'França'
+            ),
+            'es': tr(
+                'Spanien',
+                'Spain',
+                'Espagne',
+                'España',
+                'Spagna',
+                'Espanha'
+            ),
+            'it': tr(
+                'Italien',
+                'Italy',
+                'Italie',
+                'Italia',
+                'Italia',
+                'Itália'
+            ),
+            'se': tr(
+                'Schweden',
+                'Sweden',
+                'Suède',
+                'Suecia',
+                'Svezia',
+                'Suécia'
+            ),
+            'no': tr(
+                'Norwegen',
+                'Norway',
+                'Norvège',
+                'Noruega',
+                'Norvegia',
+                'Noruega'
+            ),
+            'dk': tr(
+                'Dänemark',
+                'Denmark',
+                'Danemark',
+                'Dinamarca',
+                'Danimarca',
+                'Dinamarca'
+            ),
+            'ca': tr(
+                'Kanada',
+                'Canada',
+                'Canada',
+                'Canadá',
+                'Canada',
+                'Canadá'
+            ),
+            'au': tr(
+                'Australien',
+                'Australia',
+                'Australie',
+                'Australia',
+                'Australia',
+                'Austrália'
+            ),
+            'jp': tr('Japan', 'Japan', 'Japon', 'Japón', 'Giappone', 'Japão'),
+            'sg': tr(
+                'Singapur',
+                'Singapore',
+                'Singapour',
+                'Singapur',
+                'Singapore',
+                'Singapura'
+            ),
         }
 
     def add_favorite_server(self, server_code):
         """Fügt Server zu Favoriten hinzu."""
         if server_code not in self.get_servers():
-            return False, f"Unbekannter Server: {server_code}"
+            return False, tr(
+                f"Unbekannter Server: {server_code}",
+                f'Unknown server: {server_code}',
+                f'Serveur inconnu : {server_code}',
+                f'Servidor desconocido: {server_code}',
+                f'Server sconosciuto: {server_code}',
+                f'Servidor desconhecido: {server_code}'
+            )
         if server_code in self.favorite_servers:
-            return False, f"{server_code} ist bereits in den Favoriten"
+            return False, tr(
+                f"{server_code} ist bereits in den Favoriten",
+                f'{server_code} is already in favorites',
+                f'{server_code} est déjà dans les favoris',
+                f'{server_code} ya está en favoritos',
+                f'{server_code} è già nei preferiti',
+                f'{server_code} já está nos favoritos'
+            )
         self.favorite_servers.append(server_code)
         self.save_config()
-        return True, f"{server_code} zu Favoriten hinzugefügt"
+        return True, tr(
+            f"{server_code} zu Favoriten hinzugefügt",
+            f'{server_code} added to favorites',
+            f'{server_code} ajouté aux favoris',
+            f'{server_code} añadido a favoritos',
+            f'{server_code} aggiunto ai preferiti',
+            f'{server_code} adicionado aos favoritos'
+        )
 
     def remove_favorite_server(self, server_code):
         """Entfernt Server aus Favoriten."""
         if server_code not in self.favorite_servers:
-            return False, f"{server_code} ist nicht in den Favoriten"
+            return False, tr(
+                f"{server_code} ist nicht in den Favoriten",
+                f'{server_code} is not in favorites',
+                f"{server_code} n'est pas dans les favoris",
+                f'{server_code} no está en favoritos',
+                f'{server_code} non è nei preferiti',
+                f'{server_code} não está nos favoritos'
+            )
         self.favorite_servers.remove(server_code)
         self.save_config()
-        return True, f"{server_code} aus Favoriten entfernt"
+        return True, tr(
+            f"{server_code} aus Favoriten entfernt",
+            f'{server_code} removed from favorites',
+            f'{server_code} retiré des favoris',
+            f'{server_code} eliminado de favoritos',
+            f'{server_code} rimosso dai preferiti',
+            f'{server_code} removido dos favoritos'
+        )
 
     def set_cached_servers(self, servers):
         """Speichert online geladene Serverliste dauerhaft für Offline-Fallback."""
@@ -242,7 +508,7 @@ fi
     def fetch_servers_from_website(self):
         """Lädt aktuelle Server-Liste von hide.me Website"""
         try:
-            url = 'https://hide.me/de/network'
+            url = f'https://hide.me/{LANGUAGE}/network'
             req = urllib.request.Request(
                 url,
                 headers={'User-Agent': 'Mozilla/5.0'}
@@ -270,7 +536,14 @@ fi
             
             return servers if servers else None
         except Exception as e:
-            print(f"Fehler beim Laden der Server-Liste: {e}")
+            print(tr(
+                f"Fehler beim Laden der Server-Liste: {e}",
+                f'Failed to load server list: {e}',
+                f'Échec du chargement des serveurs : {e}',
+                f'Error al cargar los servidores: {e}',
+                f'Caricamento dei server non riuscito: {e}',
+                f'Falha ao carregar os servidores: {e}'
+            ))
             return None
 
 
@@ -286,9 +559,23 @@ class HideMeIndicator:
         # Prüfe Installation
         if not self.vpn.is_installed():
             self.show_error_dialog(
-                "Hide.me CLI nicht installiert",
-                "Bitte installiere zuerst hide.me CLI:\n"
-                "sudo ./install.sh im hide.me Verzeichnis"
+                tr(
+                    "Hide.me CLI nicht installiert",
+                    'Hide.me CLI is not installed',
+                    "Hide.me CLI n'est pas installé",
+                    'Hide.me CLI no está instalado',
+                    'Hide.me CLI non è installato',
+                    'Hide.me CLI não está instalado'
+                ),
+                tr(
+                    "Bitte installiere zuerst hide.me CLI:\n"
+                "sudo ./install.sh im hide.me Verzeichnis",
+                    'Please install hide.me CLI first:\nsudo ./install.sh in the hide.me directory',
+                    "Installez d'abord hide.me CLI :\nsudo ./install.sh dans le dossier hide.me",
+                    'Instala primero hide.me CLI:\nsudo ./install.sh en la carpeta de hide.me',
+                    'Installa prima hide.me CLI:\nsudo ./install.sh nella cartella hide.me',
+                    'Instale primeiro hide.me CLI:\nsudo ./install.sh na pasta hide.me'
+                )
             )
             sys.exit(1)
         
@@ -337,14 +624,35 @@ class HideMeIndicator:
     def _load_servers_background(self):
         """Lädt Server-Liste im Hintergrund beim Start"""
         def load():
-            print("Lade Server-Liste von hide.me Website...")
+            print(tr(
+                "Lade Server-Liste von hide.me Website...",
+                'Loading server list from the hide.me website...',
+                'Chargement des serveurs depuis le site hide.me...',
+                'Cargando servidores desde el sitio web de hide.me...',
+                'Caricamento dei server dal sito hide.me...',
+                'A carregar servidores do site hide.me...'
+            ))
             servers = self.vpn.fetch_servers_from_website()
             if servers:
                 self.cached_servers = servers
                 self.vpn.set_cached_servers(servers)
-                print(f"✓ {len(servers)} Server geladen")
+                print(tr(
+                    f"✓ {len(servers)} Server geladen",
+                    f'✓ Loaded {len(servers)} servers',
+                    f'✓ {len(servers)} serveurs chargés',
+                    f'✓ {len(servers)} servidores cargados',
+                    f'✓ {len(servers)} server caricati',
+                    f'✓ {len(servers)} servidores carregados'
+                ))
             else:
-                print("⚠️  Server-Liste konnte nicht geladen werden - verwende Fallback")
+                print(tr(
+                    "⚠️  Server-Liste konnte nicht geladen werden - verwende Fallback",
+                    '⚠️  Could not load server list - using fallback',
+                    '⚠️  Impossible de charger les serveurs - utilisation de la liste de secours',
+                    '⚠️  No se pudieron cargar los servidores - usando la lista de respaldo',
+                    '⚠️  Impossibile caricare i server - uso della lista di riserva',
+                    '⚠️  Não foi possível carregar os servidores - a usar a lista alternativa'
+                ))
         
         thread = threading.Thread(target=load)
         thread.daemon = True
@@ -403,13 +711,34 @@ class HideMeIndicator:
                 if self._is_remote_version_newer(latest, __version__):
                     GLib.idle_add(
                         self.show_notification,
-                        "Hide.me VPN Update verfügbar",
-                        f"Neue Version gefunden: {latest} (installiert: {__version__})",
+                        tr(
+                            "Hide.me VPN Update verfügbar",
+                            'Hide.me VPN update available',
+                            'Mise à jour Hide.me VPN disponible',
+                            'Actualización de Hide.me VPN disponible',
+                            'Aggiornamento Hide.me VPN disponibile',
+                            'Atualização do Hide.me VPN disponível'
+                        ),
+                        tr(
+                            f"Neue Version gefunden: {latest} (installiert: {__version__})",
+                            f'New version found: {latest} (installed: {__version__})',
+                            f'Nouvelle version : {latest} (installée : {__version__})',
+                            f'Nueva versión: {latest} (instalada: {__version__})',
+                            f'Nuova versione: {latest} (installata: {__version__})',
+                            f'Nova versão: {latest} (instalada: {__version__})'
+                        ),
                         "system-software-update"
                     )
             except Exception as e:
                 # Update-Check darf niemals die App-Funktion beeinträchtigen.
-                print(f"Update-Check übersprungen: {e}")
+                print(tr(
+                    f"Update-Check übersprungen: {e}",
+                    f'Update check skipped: {e}',
+                    f'Vérification des mises à jour ignorée : {e}',
+                    f'Comprobación de actualizaciones omitida: {e}',
+                    f'Verifica aggiornamenti saltata: {e}',
+                    f'Verificação de atualizações ignorada: {e}'
+                ))
 
         thread = threading.Thread(target=run)
         thread.daemon = True
@@ -420,38 +749,80 @@ class HideMeIndicator:
         menu = Gtk.Menu()
         
         # Status & Server Dialog öffnen
-        status_dialog_item = Gtk.MenuItem(label="Status & Server...")
+        status_dialog_item = Gtk.MenuItem(label=tr(
+            "Status & Server...",
+            'Status & Servers...',
+            'État et serveurs...',
+            'Estado y servidores...',
+            'Stato e server...',
+            'Estado e servidores...'
+        ))
         status_dialog_item.connect("activate", lambda w: self.show_status_dialog())
         menu.append(status_dialog_item)
         
         menu.append(Gtk.SeparatorMenuItem())
         
         # Status-Item (nicht klickbar)
-        self.status_item = Gtk.MenuItem(label="Status: Getrennt")
+        self.status_item = Gtk.MenuItem(label=tr(
+            "Status: Getrennt",
+            'Status: Disconnected',
+            'État : Déconnecté',
+            'Estado: Desconectado',
+            'Stato: Disconnesso',
+            'Estado: Desligado'
+        ))
         self.status_item.set_sensitive(False)
         menu.append(self.status_item)
         
         menu.append(Gtk.SeparatorMenuItem())
         
         # Verbinden/Trennen Button
-        self.toggle_item = Gtk.MenuItem(label="Verbinden")
+        self.toggle_item = Gtk.MenuItem(label=tr(
+            "Verbinden",
+            'Connect',
+            'Se connecter',
+            'Conectar',
+            'Connetti',
+            'Ligar'
+        ))
         self.toggle_item.connect("activate", self.on_toggle_connection)
         menu.append(self.toggle_item)
 
         # Best Location
-        best_item = Gtk.MenuItem(label="Mit bestem Server verbinden")
+        best_item = Gtk.MenuItem(label=tr(
+            "Mit bestem Server verbinden",
+            'Connect to best server',
+            'Se connecter au meilleur serveur',
+            'Conectar al mejor servidor',
+            'Connetti al server migliore',
+            'Ligar ao melhor servidor'
+        ))
         best_item.connect("activate", lambda w: self.on_connect_best_server())
         menu.append(best_item)
         
         # Notfall-Reset (immer verfügbar)
-        self.reset_item = Gtk.MenuItem(label="Verbindung zurücksetzen (Notfall)")
+        self.reset_item = Gtk.MenuItem(label=tr(
+            "Verbindung zurücksetzen (Notfall)",
+            'Reset connection (emergency)',
+            'Réinitialiser la connexion (urgence)',
+            'Restablecer conexión (emergencia)',
+            'Ripristina connessione (emergenza)',
+            'Repor ligação (emergência)'
+        ))
         self.reset_item.connect("activate", lambda w: self.confirm_and_reset())
         menu.append(self.reset_item)
 
         menu.append(Gtk.SeparatorMenuItem())
         
         # Server-Auswahl Untermenü
-        server_item = Gtk.MenuItem(label="Server wählen")
+        server_item = Gtk.MenuItem(label=tr(
+            "Server wählen",
+            'Choose server',
+            'Choisir un serveur',
+            'Elegir servidor',
+            'Scegli server',
+            'Escolher servidor'
+        ))
         server_menu = Gtk.Menu()
         
         for code, name in self.vpn.get_servers().items():
@@ -463,7 +834,14 @@ class HideMeIndicator:
         menu.append(server_item)
 
         # Favoriten-Untermenü
-        favorites_item = Gtk.MenuItem(label="Favoriten")
+        favorites_item = Gtk.MenuItem(label=tr(
+            "Favoriten",
+            'Favorites',
+            'Favoris',
+            'Favoritos',
+            'Preferiti',
+            'Favoritos'
+        ))
         favorites_menu = Gtk.Menu()
 
         if self.vpn.favorite_servers:
@@ -473,17 +851,38 @@ class HideMeIndicator:
                 item.connect("activate", self.on_select_server, code)
                 favorites_menu.append(item)
         else:
-            no_fav_item = Gtk.MenuItem(label="(keine Favoriten)")
+            no_fav_item = Gtk.MenuItem(label=tr(
+                "(keine Favoriten)",
+                '(no favorites)',
+                '(aucun favori)',
+                '(sin favoritos)',
+                '(nessun preferito)',
+                '(sem favoritos)'
+            ))
             no_fav_item.set_sensitive(False)
             favorites_menu.append(no_fav_item)
 
         favorites_menu.append(Gtk.SeparatorMenuItem())
 
-        add_current_item = Gtk.MenuItem(label="Aktuellen Server zu Favoriten")
+        add_current_item = Gtk.MenuItem(label=tr(
+            "Aktuellen Server zu Favoriten",
+            'Add current server to favorites',
+            'Ajouter le serveur actuel aux favoris',
+            'Añadir el servidor actual a favoritos',
+            'Aggiungi il server attuale ai preferiti',
+            'Adicionar o servidor atual aos favoritos'
+        ))
         add_current_item.connect("activate", lambda w: self.on_add_current_favorite())
         favorites_menu.append(add_current_item)
 
-        remove_current_item = Gtk.MenuItem(label="Aktuellen Server aus Favoriten")
+        remove_current_item = Gtk.MenuItem(label=tr(
+            "Aktuellen Server aus Favoriten",
+            'Remove current server from favorites',
+            'Retirer le serveur actuel des favoris',
+            'Eliminar el servidor actual de favoritos',
+            'Rimuovi il server attuale dai preferiti',
+            'Remover o servidor atual dos favoritos'
+        ))
         remove_current_item.connect("activate", lambda w: self.on_remove_current_favorite())
         favorites_menu.append(remove_current_item)
 
@@ -492,7 +891,14 @@ class HideMeIndicator:
         
         # Aktueller Server
         self.current_server_item = Gtk.MenuItem(
-            label=f"Aktuell: {self.vpn.current_server}"
+            label=tr(
+                f"Aktuell: {self.vpn.current_server}",
+                f'Current: {self.vpn.current_server}',
+                f'Actuel : {self.vpn.current_server}',
+                f'Actual: {self.vpn.current_server}',
+                f'Attuale: {self.vpn.current_server}',
+                f'Atual: {self.vpn.current_server}'
+            )
         )
         self.current_server_item.set_sensitive(False)
         menu.append(self.current_server_item)
@@ -500,12 +906,26 @@ class HideMeIndicator:
         menu.append(Gtk.SeparatorMenuItem())
         
         # Info
-        info_item = Gtk.MenuItem(label="Über")
+        info_item = Gtk.MenuItem(label=tr(
+            "Über",
+            'About',
+            'À propos',
+            'Acerca de',
+            'Informazioni',
+            'Sobre'
+        ))
         info_item.connect("activate", self.show_about)
         menu.append(info_item)
         
         # Beenden
-        quit_item = Gtk.MenuItem(label="Beenden")
+        quit_item = Gtk.MenuItem(label=tr(
+            "Beenden",
+            'Quit',
+            'Quitter',
+            'Salir',
+            'Esci',
+            'Sair'
+        ))
         quit_item.connect("activate", self.on_quit)
         menu.append(quit_item)
         
@@ -537,14 +957,56 @@ class HideMeIndicator:
             # Icon und Labels aktualisieren
             if connected:
                 icon_name = "network-vpn"
-                status_text = "Status: Verbunden ✓"
-                toggle_text = "Trennen"
-                tooltip = f"Hide.me VPN - Verbunden mit {self.vpn.current_server}"
+                status_text = tr(
+                    "Status: Verbunden ✓",
+                    'Status: Connected ✓',
+                    'État : Connecté ✓',
+                    'Estado: Conectado ✓',
+                    'Stato: Connesso ✓',
+                    'Estado: Ligado ✓'
+                )
+                toggle_text = tr(
+                    "Trennen",
+                    'Disconnect',
+                    'Se déconnecter',
+                    'Desconectar',
+                    'Disconnetti',
+                    'Desligar'
+                )
+                tooltip = tr(
+                    f"Hide.me VPN - Verbunden mit {self.vpn.current_server}",
+                    f'Hide.me VPN - Connected to {self.vpn.current_server}',
+                    f'Hide.me VPN - Connecté à {self.vpn.current_server}',
+                    f'Hide.me VPN - Conectado a {self.vpn.current_server}',
+                    f'Hide.me VPN - Connesso a {self.vpn.current_server}',
+                    f'Hide.me VPN - Ligado a {self.vpn.current_server}'
+                )
             else:
                 icon_name = "network-vpn-disconnected"
-                status_text = "Status: Getrennt"
-                toggle_text = "Verbinden"
-                tooltip = "Hide.me VPN - Getrennt"
+                status_text = tr(
+                    "Status: Getrennt",
+                    'Status: Disconnected',
+                    'État : Déconnecté',
+                    'Estado: Desconectado',
+                    'Stato: Disconnesso',
+                    'Estado: Desligado'
+                )
+                toggle_text = tr(
+                    "Verbinden",
+                    'Connect',
+                    'Se connecter',
+                    'Conectar',
+                    'Connetti',
+                    'Ligar'
+                )
+                tooltip = tr(
+                    "Hide.me VPN - Getrennt",
+                    'Hide.me VPN - Disconnected',
+                    'Hide.me VPN - Déconnecté',
+                    'Hide.me VPN - Desconectado',
+                    'Hide.me VPN - Disconnesso',
+                    'Hide.me VPN - Desligado'
+                )
             
             # Icon aktualisieren (je nach Modus)
             if self.use_appindicator:
@@ -559,10 +1021,24 @@ class HideMeIndicator:
             
             # Server-Info
             self.current_server_item.set_label(
-                f"Aktuell: {self.vpn.current_server}"
+                tr(
+                    f"Aktuell: {self.vpn.current_server}",
+                    f'Current: {self.vpn.current_server}',
+                    f'Actuel : {self.vpn.current_server}',
+                    f'Actual: {self.vpn.current_server}',
+                    f'Attuale: {self.vpn.current_server}',
+                    f'Atual: {self.vpn.current_server}'
+                )
             )
         except Exception as e:
-            print(f"Status-Update fehlgeschlagen: {e}")
+            print(tr(
+                f"Status-Update fehlgeschlagen: {e}",
+                f'Status update failed: {e}',
+                f"Échec de la mise à jour de l'état : {e}",
+                f'Error al actualizar el estado: {e}',
+                f'Aggiornamento dello stato non riuscito: {e}',
+                f'Falha ao atualizar o estado: {e}'
+            ))
         
         return True  # Weiter ausführen
     
@@ -641,7 +1117,14 @@ class HideMeIndicator:
                 GLib.idle_add(
                     self.show_notification,
                     "Hide.me VPN",
-                    "Kein erreichbarer Server für Best Location gefunden",
+                    tr(
+                        "Kein erreichbarer Server für Best Location gefunden",
+                        'No reachable server found for Best Location',
+                        'Aucun serveur accessible trouvé pour Best Location',
+                        'No se encontró ningún servidor accesible para Best Location',
+                        'Nessun server raggiungibile trovato per Best Location',
+                        'Nenhum servidor acessível encontrado para Best Location'
+                    ),
                     "dialog-error"
                 )
                 return
@@ -690,7 +1173,14 @@ class HideMeIndicator:
             self.update_status()
             self.show_notification(
                 "Hide.me VPN",
-                f"Server gewechselt zu {server_code}",
+                tr(
+                    f"Server gewechselt zu {server_code}",
+                    f'Server changed to {server_code}',
+                    f'Serveur changé pour {server_code}',
+                    f'Servidor cambiado a {server_code}',
+                    f'Server cambiato in {server_code}',
+                    f'Servidor alterado para {server_code}'
+                ),
                 "network-vpn"
             )
 
@@ -722,12 +1212,42 @@ class HideMeIndicator:
             transient_for=parent_dialog,
             flags=0,
             message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text="Verbindung wirklich zurücksetzen?"
+            buttons=Gtk.ButtonsType.NONE,
+            text=tr(
+                "Verbindung wirklich zurücksetzen?",
+                'Reset the connection?',
+                'Réinitialiser la connexion ?',
+                '¿Restablecer la conexión?',
+                'Ripristinare la connessione?',
+                'Repor a ligação?'
+            )
         )
         confirm_dialog.format_secondary_text(
-            "Der Notfall-Reset stoppt alle hide.me Dienste und setzt Routing/DNS zurück."
+            tr(
+                "Der Notfall-Reset stoppt alle hide.me Dienste und setzt Routing/DNS zurück.",
+                'The emergency reset stops all hide.me services and resets routing/DNS.',
+                "La réinitialisation d'urgence arrête tous les services hide.me et réinitialise le routage/DNS.",
+                'El restablecimiento de emergencia detiene todos los servicios hide.me y restablece las rutas y el DNS.',
+                'Il ripristino di emergenza arresta tutti i servizi hide.me e ripristina routing/DNS.',
+                'A reposição de emergência para todos os serviços hide.me e repõe o encaminhamento/DNS.'
+            )
         )
+        confirm_dialog.add_button(tr(
+            "Nein",
+            "No",
+            'Non',
+            'No',
+            'No',
+            'Não'
+        ), Gtk.ResponseType.NO)
+        confirm_dialog.add_button(tr(
+            "Ja",
+            "Yes",
+            'Oui',
+            'Sí',
+            'Sì',
+            'Sim'
+        ), Gtk.ResponseType.YES)
         response = confirm_dialog.run()
         confirm_dialog.destroy()
 
@@ -754,14 +1274,28 @@ class HideMeIndicator:
     def show_notification(self, title, message, icon="network-vpn"):
         """Zeigt Desktop-Benachrichtigung"""
         if not HAS_NOTIFY:
-            print(f"[Benachrichtigung] {title}: {message}")
+            print(tr(
+                f"[Benachrichtigung] {title}: {message}",
+                f'[Notification] {title}: {message}',
+                f'[Notification] {title} : {message}',
+                f'[Notificación] {title}: {message}',
+                f'[Notifica] {title}: {message}',
+                f'[Notificação] {title}: {message}'
+            ))
             return
         
         try:
             notification = Notify.Notification.new(title, message, icon)
             notification.show()
         except Exception as e:
-            print(f"Benachrichtigung fehlgeschlagen: {e}")
+            print(tr(
+                f"Benachrichtigung fehlgeschlagen: {e}",
+                f'Notification failed: {e}',
+                f'Échec de la notification : {e}',
+                f'Error de notificación: {e}',
+                f'Notifica non riuscita: {e}',
+                f'Falha na notificação: {e}'
+            ))
     
     def show_about(self, widget):
         """Zeigt Info-Dialog"""
@@ -769,15 +1303,29 @@ class HideMeIndicator:
         dialog.set_program_name("Hide.me VPN GUI")
         dialog.set_version(__version__)
         dialog.set_comments(
-            "Benutzerfreundliche GUI für hide.me CLI\n\n"
+            tr(
+                "Benutzerfreundliche GUI für hide.me CLI\n\n"
             "Funktionen:\n"
             "• Einfaches Verbinden/Trennen\n"
             "• Server-Auswahl\n"
             "• Status-Anzeige im System Tray\n"
-            "• Desktop-Benachrichtigungen"
+            "• Desktop-Benachrichtigungen",
+                'Easy-to-use GUI for hide.me CLI\n\nFeatures:\n• Connect/disconnect easily\n• Server selection\n• System tray status\n• Desktop notifications',
+                'Interface simple pour hide.me CLI\n\nFonctionnalités :\n• Connexion/déconnexion facile\n• Sélection du serveur\n• État dans la barre système\n• Notifications',
+                'Interfaz sencilla para hide.me CLI\n\nFunciones:\n• Conexión/desconexión sencilla\n• Selección de servidor\n• Estado en la bandeja del sistema\n• Notificaciones',
+                "Interfaccia semplice per hide.me CLI\n\nFunzioni:\n• Connessione/disconnessione semplice\n• Selezione del server\n• Stato nell'area di notifica\n• Notifiche desktop",
+                'Interface simples para hide.me CLI\n\nFuncionalidades:\n• Ligar/desligar facilmente\n• Seleção de servidor\n• Estado na área de notificação\n• Notificações'
+            )
         )
         dialog.set_website(f"https://github.com/{GITHUB_REPO}")
-        dialog.set_website_label("GitHub-Projekt öffnen")
+        dialog.set_website_label(tr(
+            "GitHub-Projekt öffnen",
+            'Open GitHub project',
+            'Ouvrir le projet GitHub',
+            'Abrir el proyecto en GitHub',
+            'Apri il progetto GitHub',
+            'Abrir o projeto no GitHub'
+        ))
         dialog.set_authors(["RechnerLotsen"])
         dialog.set_copyright("RechnerLotsen 2025-2026")
         dialog.run()
@@ -807,7 +1355,8 @@ class HideMeIndicator:
         connected = self.vpn.get_status()
         
         dialog = Gtk.Dialog(
-            title="Hide.me VPN Status",
+            title=tr("Hide.me VPN Status", "Hide.me VPN Status", "État de Hide.me VPN",
+                     "Estado de Hide.me VPN", "Stato di Hide.me VPN", "Estado do Hide.me VPN"),
             parent=None,
             flags=0
         )
@@ -826,38 +1375,87 @@ class HideMeIndicator:
         if connected:
             status_label = Gtk.Label()
             status_label.set_markup(
-                f"<b>✓ Verbunden</b>\n"
-                f"Server: {self.vpn.current_server}"
+                tr(
+                    f"<b>✓ Verbunden</b>\n"
+                f"Server: {self.vpn.current_server}",
+                    f'<b>✓ Connected</b>\nServer: {self.vpn.current_server}',
+                    f'<b>✓ Connecté</b>\nServeur : {self.vpn.current_server}',
+                    f'<b>✓ Conectado</b>\nServidor: {self.vpn.current_server}',
+                    f'<b>✓ Connesso</b>\nServer: {self.vpn.current_server}',
+                    f'<b>✓ Ligado</b>\nServidor: {self.vpn.current_server}'
+                )
             )
             box.pack_start(status_label, False, False, 0)
             
             # Trennen-Button
-            disconnect_btn = Gtk.Button(label="Verbindung trennen")
+            disconnect_btn = Gtk.Button(label=tr(
+                "Verbindung trennen",
+                'Disconnect',
+                'Se déconnecter',
+                'Desconectar',
+                'Disconnetti',
+                'Desligar'
+            ))
             disconnect_btn.connect("clicked", lambda w: self.disconnect_and_close(dialog))
             box.pack_start(disconnect_btn, False, False, 0)
 
             # Notfall-Reset
-            reset_btn = Gtk.Button(label="Verbindung zurücksetzen (Notfall)")
+            reset_btn = Gtk.Button(label=tr(
+                "Verbindung zurücksetzen (Notfall)",
+                'Reset connection (emergency)',
+                'Réinitialiser la connexion (urgence)',
+                'Restablecer conexión (emergencia)',
+                'Ripristina connessione (emergenza)',
+                'Repor ligação (emergência)'
+            ))
             reset_btn.connect("clicked", lambda w: self.confirm_and_reset(dialog))
             box.pack_start(reset_btn, False, False, 0)
         else:
             status_label = Gtk.Label()
-            status_label.set_markup("<b>✗ Nicht verbunden</b>")
+            status_label.set_markup(tr(
+                "<b>✗ Nicht verbunden</b>",
+                '<b>✗ Not connected</b>',
+                '<b>✗ Non connecté</b>',
+                '<b>✗ No conectado</b>',
+                '<b>✗ Non connesso</b>',
+                '<b>✗ Não ligado</b>'
+            ))
             box.pack_start(status_label, False, False, 0)
 
-            best_btn = Gtk.Button(label="Mit bestem Server verbinden")
+            best_btn = Gtk.Button(label=tr(
+                "Mit bestem Server verbinden",
+                'Connect to best server',
+                'Se connecter au meilleur serveur',
+                'Conectar al mejor servidor',
+                'Connetti al server migliore',
+                'Ligar ao melhor servidor'
+            ))
             best_btn.connect("clicked", lambda w: (dialog.destroy(), self.on_connect_best_server()))
             box.pack_start(best_btn, False, False, 0)
 
             # Notfall-Reset auch ohne bestehende Verbindung
-            reset_btn = Gtk.Button(label="Verbindung zurücksetzen (Notfall)")
+            reset_btn = Gtk.Button(label=tr(
+                "Verbindung zurücksetzen (Notfall)",
+                'Reset connection (emergency)',
+                'Réinitialiser la connexion (urgence)',
+                'Restablecer conexión (emergencia)',
+                'Ripristina connessione (emergenza)',
+                'Repor ligação (emergência)'
+            ))
             reset_btn.connect("clicked", lambda w: self.confirm_and_reset(dialog))
             box.pack_start(reset_btn, False, False, 0)
 
         # Server-Liste immer anzeigen (auch wenn bereits verbunden).
         self.populate_server_list(dialog, box, None, self.cached_servers)
         
-        dialog.add_button("Schließen", Gtk.ResponseType.CLOSE)
+        dialog.add_button(tr(
+            "Schließen",
+            'Close',
+            'Fermer',
+            'Cerrar',
+            'Chiudi',
+            'Fechar'
+        ), Gtk.ResponseType.CLOSE)
         dialog.show_all()
         dialog.run()
         dialog.destroy()
@@ -876,8 +1474,15 @@ class HideMeIndicator:
             # Fallback auf statische Liste
             error_label = Gtk.Label()
             error_label.set_markup(
-                "<i>Server-Liste konnte nicht geladen werden.\n"
-                "Verwende Fallback-Liste...</i>"
+                tr(
+                    "<i>Server-Liste konnte nicht geladen werden.\n"
+                "Verwende Fallback-Liste...</i>",
+                    '<i>Could not load server list.\nUsing fallback list...</i>',
+                    '<i>Impossible de charger les serveurs.\nUtilisation de la liste de secours...</i>',
+                    '<i>No se pudieron cargar los servidores.\nUsando la lista de respaldo...</i>',
+                    '<i>Impossibile caricare i server.\nUso della lista di riserva...</i>',
+                    '<i>Não foi possível carregar os servidores.\nA usar a lista alternativa...</i>'
+                )
             )
             box.pack_start(error_label, False, False, 0)
             
@@ -892,7 +1497,14 @@ class HideMeIndicator:
         
         # Server-Auswahl Label
         select_label = Gtk.Label()
-        select_label.set_markup("<b>Server auswählen:</b>")
+        select_label.set_markup(tr(
+            "<b>Server auswählen:</b>",
+            '<b>Select a server:</b>',
+            '<b>Sélectionnez un serveur :</b>',
+            '<b>Selecciona un servidor:</b>',
+            '<b>Seleziona un server:</b>',
+            '<b>Selecione um servidor:</b>'
+        ))
         box.pack_start(select_label, False, False, 0)
         
         # Scrollbare Liste
@@ -922,11 +1534,25 @@ class HideMeIndicator:
         box.pack_start(scrolled, True, True, 0)
         
         # Verbinden-Button
-        connect_btn = Gtk.Button(label="Verbinden")
+        connect_btn = Gtk.Button(label=tr(
+            "Verbinden",
+            'Connect',
+            'Se connecter',
+            'Conectar',
+            'Connetti',
+            'Ligar'
+        ))
         connect_btn.connect("clicked", lambda w: self.connect_selected_server(dialog, listbox))
         box.pack_start(connect_btn, False, False, 0)
         
-        dialog.add_button("Abbrechen", Gtk.ResponseType.CANCEL)
+        dialog.add_button(tr(
+            "Abbrechen",
+            'Cancel',
+            'Annuler',
+            'Cancelar',
+            'Annulla',
+            'Cancelar'
+        ), Gtk.ResponseType.CANCEL)
         dialog.show_all()
 
         def update_ping_label(server_code, ping):
@@ -948,8 +1574,22 @@ class HideMeIndicator:
         selected_row = listbox.get_selected_row()
         if not selected_row:
             self.show_notification(
-                "Keine Auswahl",
-                "Bitte wähle einen Server aus",
+                tr(
+                    "Keine Auswahl",
+                    'No selection',
+                    'Aucune sélection',
+                    'Sin selección',
+                    'Nessuna selezione',
+                    'Nenhuma seleção'
+                ),
+                tr(
+                    "Bitte wähle einen Server aus",
+                    'Please select a server',
+                    'Veuillez sélectionner un serveur',
+                    'Selecciona un servidor',
+                    'Seleziona un server',
+                    'Selecione um servidor'
+                ),
                 "dialog-warning"
             )
             return
@@ -963,7 +1603,14 @@ class HideMeIndicator:
 
             if self.vpn.connected:
                 if selected_code == self.vpn.current_server:
-                    success, message = True, f"Bereits verbunden mit {selected_code}"
+                    success, message = True, tr(
+                        f"Bereits verbunden mit {selected_code}",
+                        f'Already connected to {selected_code}',
+                        f'Déjà connecté à {selected_code}',
+                        f'Ya conectado a {selected_code}',
+                        f'Già connesso a {selected_code}',
+                        f'Já ligado a {selected_code}'
+                    )
                 else:
                     self.vpn.disconnect()
                     time.sleep(1)
@@ -1006,18 +1653,39 @@ class HideMeIndicator:
 
 def main():
     """Hauptfunktion"""
-    parser = argparse.ArgumentParser(description="Hide.me VPN GUI und CLI-Helfer")
+    parser = argparse.ArgumentParser(description=tr(
+        "Hide.me VPN GUI und CLI-Helfer",
+        'Hide.me VPN GUI and CLI helpers',
+        'Interface hide.me VPN et outils CLI',
+        'Interfaz de hide.me VPN y herramientas CLI',
+        'Interfaccia hide.me VPN e strumenti CLI',
+        'Interface hide.me VPN e ferramentas CLI'
+    ))
     parser.add_argument(
         "--emergency-reset",
         action="store_true",
-        help="Führt Notfall-Reset (Routing/DNS/VPN) per pkexec aus"
+        help=tr(
+            "Führt Notfall-Reset (Routing/DNS/VPN) per pkexec aus",
+            'Run emergency reset (routing/DNS/VPN) via pkexec',
+            "Réinitialisation d'urgence (routage/DNS/VPN) via pkexec",
+            'Restablecimiento de emergencia (rutas/DNS/VPN) mediante pkexec',
+            'Ripristino di emergenza (routing/DNS/VPN) tramite pkexec',
+            'Reposição de emergência (encaminhamento/DNS/VPN) via pkexec'
+        )
     )
     args = parser.parse_args()
 
     if args.emergency_reset:
         vpn = HideMeVPN()
         if not vpn.is_installed():
-            print("Hide.me CLI nicht installiert.")
+            print(tr(
+                "Hide.me CLI nicht installiert.",
+                'Hide.me CLI is not installed.',
+                "Hide.me CLI n'est pas installé.",
+                'Hide.me CLI no está instalado.',
+                'Hide.me CLI non è installato.',
+                'Hide.me CLI não está instalado.'
+            ))
             sys.exit(1)
         success, message = vpn.emergency_reset()
         print(message)
@@ -1026,16 +1694,51 @@ def main():
     # Prüfe benötigte Pakete
     missing = []
     if not HAS_APPINDICATOR:
-        missing.append("gir1.2-appindicator3-0.1 (empfohlen)")
+        missing.append(tr(
+            "gir1.2-appindicator3-0.1 (empfohlen)",
+            'gir1.2-appindicator3-0.1 (recommended)',
+            'gir1.2-appindicator3-0.1 (recommandé)',
+            'gir1.2-appindicator3-0.1 (recomendado)',
+            'gir1.2-appindicator3-0.1 (consigliato)',
+            'gir1.2-appindicator3-0.1 (recomendado)'
+        ))
     if not HAS_NOTIFY:
-        missing.append("gir1.2-notify-0.7 (empfohlen)")
+        missing.append(tr(
+            "gir1.2-notify-0.7 (empfohlen)",
+            'gir1.2-notify-0.7 (recommended)',
+            'gir1.2-notify-0.7 (recommandé)',
+            'gir1.2-notify-0.7 (recomendado)',
+            'gir1.2-notify-0.7 (consigliato)',
+            'gir1.2-notify-0.7 (recomendado)'
+        ))
     
     if missing:
-        print("\n⚠️  Optionale Pakete fehlen:")
+        print(tr(
+            "\n⚠️  Optionale Pakete fehlen:",
+            '\n⚠️  Optional packages missing:',
+            '\n⚠️  Paquets optionnels manquants :',
+            '\n⚠️  Faltan paquetes opcionales:',
+            '\n⚠️  Pacchetti opzionali mancanti:',
+            '\n⚠️  Pacotes opcionais em falta:'
+        ))
         for pkg in missing:
             print(f"   - {pkg}")
-        print("\nInstalliere mit: sudo apt install " + " ".join(p.split()[0] for p in missing))
-        print("\nDie GUI funktioniert auch ohne diese Pakete, aber mit eingeschränkten Features.\n")
+        print(tr(
+            "\nInstalliere mit: sudo apt install ",
+            '\nInstall with: sudo apt install ',
+            '\nInstallez avec : sudo apt install ',
+            '\nInstala con: sudo apt install ',
+            '\nInstalla con: sudo apt install ',
+            '\nInstale com: sudo apt install '
+        ) + " ".join(p.split()[0] for p in missing))
+        print(tr(
+            "\nDie GUI funktioniert auch ohne diese Pakete, aber mit eingeschränkten Features.\n",
+            '\nThe GUI also works without these packages, but with limited features.\n',
+            "\nL'interface fonctionne sans ces paquets, mais avec des fonctionnalités limitées.\n",
+            '\nLa interfaz funciona sin estos paquetes, pero con funciones limitadas.\n',
+            "\nL'interfaccia funziona senza questi pacchetti, ma con funzionalità limitate.\n",
+            '\nA interface funciona sem estes pacotes, mas com funcionalidades limitadas.\n'
+        ))
     
     indicator = HideMeIndicator()
     Gtk.main()
