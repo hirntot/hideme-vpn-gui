@@ -4,7 +4,7 @@ Hide.me VPN Notification Bar / System Tray GUI
 Benutzerfreundliche GUI für hide.me CLI VPN
 """
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 GITHUB_REPO = "hirntot/hideme-vpn-gui"
 
 import os
@@ -173,6 +173,17 @@ class HideMeVPN:
                 'systemctl', 'list-units', '--type=service', '--state=active',
                 '--no-legend', '--plain', 'hide.me@*.service'
             ]
+        elif mode == 'busy':
+            command = [
+                'systemctl', 'list-units', '--type=service',
+                '--state=active,activating,reloading,deactivating',
+                '--no-legend', '--plain', 'hide.me@*.service'
+            ]
+        elif mode == 'loaded':
+            command = [
+                'systemctl', 'list-units', '--type=service', '--all',
+                '--no-legend', '--plain', 'hide.me@*.service'
+            ]
         elif mode == 'enabled':
             command = [
                 'systemctl', 'list-unit-files', '--state=enabled',
@@ -200,6 +211,14 @@ class HideMeVPN:
         return cls._list_service_units('active')
 
     @classmethod
+    def busy_service_units(cls):
+        return cls._list_service_units('busy')
+
+    @classmethod
+    def loaded_service_units(cls):
+        return cls._list_service_units('loaded')
+
+    @classmethod
     def enabled_service_units(cls):
         return cls._list_service_units('enabled')
 
@@ -224,7 +243,7 @@ class HideMeVPN:
             return False, 'cleanup requires root privileges'
 
         units = sorted(set(
-            cls.active_service_units() + cls.enabled_service_units()
+            cls.loaded_service_units() + cls.enabled_service_units()
         ))
         failures = []
         for unit in units:
@@ -236,9 +255,9 @@ class HideMeVPN:
                 if result.returncode != 0:
                     failures.append(f'{action} {unit}')
 
-        active = cls.active_service_units()
-        if active:
-            return False, 'hide.me services still active: ' + ', '.join(active)
+        busy = cls.busy_service_units()
+        if busy:
+            return False, 'hide.me services still running: ' + ', '.join(busy)
 
         try:
             cls._delete_table_rules(ipv6=False)
@@ -302,6 +321,21 @@ class HideMeVPN:
         installed = '/usr/local/bin/hideme-vpn-gui'
         return installed if os.path.exists(installed) else os.path.realpath(sys.argv[0])
 
+    def _run_privileged_cleanup(self):
+        return subprocess.run(
+            ['pkexec', self._cleanup_program(), '--cleanup-routing'],
+            capture_output=True, text=True, check=False, timeout=90
+        )
+
+    def _cleanup_after_connect_failure(self):
+        try:
+            result = self._run_privileged_cleanup()
+        except (OSError, subprocess.SubprocessError) as error:
+            return str(error)
+        if result.returncode == 0:
+            return None
+        return result.stderr.strip() or result.stdout.strip() or 'routing cleanup failed'
+
     def get_status(self):
         """Detect every active hide.me instance, including manually started ones."""
         try:
@@ -352,31 +386,32 @@ class HideMeVPN:
                 f'Ligado a {self.current_server}'
             )
         except subprocess.CalledProcessError as e:
+            cleanup_error = self._cleanup_after_connect_failure()
+            suffix = f'; cleanup failed: {cleanup_error}' if cleanup_error else ''
             return False, tr(
-                f"Verbindung fehlgeschlagen: {e}",
-                f'Connection failed: {e}',
-                f'Échec de la connexion : {e}',
-                f'Error de conexión: {e}',
-                f'Connessione non riuscita: {e}',
-                f'Falha na ligação: {e}'
+                f"Verbindung fehlgeschlagen: {e}{suffix}",
+                f'Connection failed: {e}{suffix}',
+                f'Échec de la connexion : {e}{suffix}',
+                f'Error de conexión: {e}{suffix}',
+                f'Connessione non riuscita: {e}{suffix}',
+                f'Falha na ligação: {e}{suffix}'
             )
         except Exception as e:
+            cleanup_error = self._cleanup_after_connect_failure()
+            suffix = f'; cleanup failed: {cleanup_error}' if cleanup_error else ''
             return False, tr(
-                f"Fehler: {e}",
-                f'Error: {e}',
-                f'Erreur : {e}',
-                f'Error: {e}',
-                f'Errore: {e}',
-                f'Erro: {e}'
+                f"Fehler: {e}{suffix}",
+                f'Error: {e}{suffix}',
+                f'Erreur : {e}{suffix}',
+                f'Error: {e}{suffix}',
+                f'Errore: {e}{suffix}',
+                f'Erro: {e}{suffix}'
             )
     
     def disconnect(self):
         """Trennt VPN-Verbindung"""
         try:
-            cleanup = subprocess.run(
-                ['pkexec', self._cleanup_program(), '--cleanup-routing'],
-                capture_output=True, text=True, check=False, timeout=90
-            )
+            cleanup = self._run_privileged_cleanup()
             if cleanup.returncode != 0:
                 detail = cleanup.stderr.strip() or cleanup.stdout.strip()
                 raise RuntimeError(detail or 'routing cleanup failed')
@@ -411,10 +446,7 @@ class HideMeVPN:
     def emergency_reset(self):
         """Setzt hide.me VPN-Reste im System zurück (Notfall-Reset)."""
         try:
-            result = subprocess.run(
-                ['pkexec', self._cleanup_program(), '--cleanup-routing'],
-                capture_output=True, text=True, check=False, timeout=90
-            )
+            result = self._run_privileged_cleanup()
             if result.returncode != 0:
                 detail = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(detail or 'routing cleanup failed')

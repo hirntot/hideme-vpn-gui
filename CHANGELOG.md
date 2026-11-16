@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.2] - 2026-11-16
+
+### Fixed
+
+- Stop loaded hide.me instances in every state, including `activating`, even
+  when the instance is not enabled. This prevents a failed connection attempt
+  from recreating the kill-switch route after emergency cleanup.
+- Run verified cleanup automatically when starting a VPN connection fails or
+  times out, restoring network access without a second manual reset.
+
 ## [1.1.1] - 2026-11-16
 
 ### Fixed

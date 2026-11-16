@@ -31,6 +31,16 @@ class CleanupTests(unittest.TestCase):
                 ['hide.me@de-1.service', 'hide.me@nl.service']
             )
 
+    def test_loaded_listing_includes_non_active_instances(self):
+        output = 'hide.me@ch.service loaded activating start connection\n'
+        with patch.object(self.module.subprocess, 'run',
+                          return_value=completed([], stdout=output)) as run:
+            self.assertEqual(
+                self.module.HideMeVPN.loaded_service_units(),
+                ['hide.me@ch.service']
+            )
+        self.assertIn('--all', run.call_args.args[0])
+
     def test_status_finds_an_active_service_other_than_saved_server(self):
         with tempfile.TemporaryDirectory() as directory:
             self.module.HideMeVPN.CONFIG_FILE = str(Path(directory) / 'config.json')
@@ -62,6 +72,29 @@ class CleanupTests(unittest.TestCase):
                 ['pkexec', '/usr/local/bin/hideme-vpn-gui', '--cleanup-routing']
             ])
 
+    def test_failed_connect_automatically_cleans_kill_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.module.HideMeVPN.CONFIG_FILE = str(Path(directory) / 'config.json')
+            vpn = self.module.HideMeVPN()
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                if command[:4] == ['pkexec', 'systemctl', 'start', 'hide.me@ch']:
+                    raise subprocess.TimeoutExpired(command, 30)
+                return completed(command)
+
+            with patch.object(vpn, '_cleanup_program',
+                              return_value='/usr/local/bin/hideme-vpn-gui'), \
+                    patch.object(self.module.subprocess, 'run', side_effect=fake_run):
+                success, _ = vpn.connect('ch')
+
+            self.assertFalse(success)
+            self.assertIn(
+                ['pkexec', '/usr/local/bin/hideme-vpn-gui', '--cleanup-routing'],
+                calls
+            )
+
     def test_cleanup_verifies_rules_routes_and_interface(self):
         commands = []
 
@@ -76,7 +109,8 @@ class CleanupTests(unittest.TestCase):
         vpn_type = self.module.HideMeVPN
         with patch.object(self.module.os, 'geteuid', return_value=0), \
                 patch.object(self.module.os.path, 'isfile', return_value=False), \
-                patch.object(vpn_type, 'active_service_units', return_value=[]), \
+                patch.object(vpn_type, 'loaded_service_units', return_value=[]), \
+                patch.object(vpn_type, 'busy_service_units', return_value=[]), \
                 patch.object(vpn_type, 'enabled_service_units', return_value=[]), \
                 patch.object(vpn_type, '_delete_table_rules'), \
                 patch.object(self.module.subprocess, 'run', side_effect=fake_run):
@@ -100,8 +134,9 @@ class CleanupTests(unittest.TestCase):
         vpn_type = self.module.HideMeVPN
         with patch.object(self.module.os, 'geteuid', return_value=0), \
                 patch.object(self.module.os.path, 'isfile', return_value=False), \
-                patch.object(vpn_type, 'active_service_units',
-                             side_effect=[['hide.me@de.service'], []]), \
+                patch.object(vpn_type, 'loaded_service_units',
+                             return_value=['hide.me@de.service']), \
+                patch.object(vpn_type, 'busy_service_units', return_value=[]), \
                 patch.object(vpn_type, 'enabled_service_units',
                              return_value=['hide.me@fr.service']), \
                 patch.object(vpn_type, '_delete_table_rules'), \
@@ -124,7 +159,8 @@ class CleanupTests(unittest.TestCase):
         vpn_type = self.module.HideMeVPN
         with patch.object(self.module.os, 'geteuid', return_value=0), \
                 patch.object(self.module.os.path, 'isfile', return_value=False), \
-                patch.object(vpn_type, 'active_service_units', return_value=[]), \
+                patch.object(vpn_type, 'loaded_service_units', return_value=[]), \
+                patch.object(vpn_type, 'busy_service_units', return_value=[]), \
                 patch.object(vpn_type, 'enabled_service_units', return_value=[]), \
                 patch.object(vpn_type, '_delete_table_rules'), \
                 patch.object(self.module.subprocess, 'run', side_effect=fake_run):

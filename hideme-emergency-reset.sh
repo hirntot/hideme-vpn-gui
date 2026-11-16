@@ -109,7 +109,7 @@ echo "$(tr "1. Stoppe alle hide.me VPN-Dienste..." \
 # nach einem Fehler gerade nicht laufen, beim nächsten Boot aber wieder starten.
 mapfile -t HIDEME_SERVICES < <(
     {
-        systemctl list-units --type=service --state=active \
+        systemctl list-units --type=service --all \
             'hide.me@*.service' --no-legend --plain 2>/dev/null
         systemctl list-unit-files --state=enabled \
             'hide.me@*.service' --no-legend --plain 2>/dev/null
@@ -477,7 +477,8 @@ else
 fi
 
 # Verifiziere den Zustand, statt trotz fehlgeschlagener Befehle Erfolg zu melden.
-if systemctl list-units --type=service --state=active 'hide.me@*.service' \
+if systemctl list-units --type=service \
+        --state=active,activating,reloading,deactivating 'hide.me@*.service' \
         --no-legend --plain 2>/dev/null | grep -q '^hide\.me@'; then
     CLEANUP_FAILED=1
 fi
