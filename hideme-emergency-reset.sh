@@ -105,19 +105,28 @@ echo "$(tr "1. Stoppe alle hide.me VPN-Dienste..." \
         "1. Arresto di tutti i servizi VPN hide.me..." \
         "1. A parar todos os serviços VPN hide.me...")"
 
-# Finde alle aktiven hide.me Services
-ACTIVE_SERVICES=$(systemctl list-units --type=service --state=active 'hide.me@*' --no-legend | awk '{print $1}')
+# Finde aktive und aktivierte Instanzen. So werden auch Dienste erfasst, die
+# nach einem Fehler gerade nicht laufen, beim nächsten Boot aber wieder starten.
+mapfile -t HIDEME_SERVICES < <(
+    {
+        systemctl list-units --type=service --state=active \
+            'hide.me@*.service' --no-legend --plain 2>/dev/null
+        systemctl list-unit-files --state=enabled \
+            'hide.me@*.service' --no-legend --plain 2>/dev/null
+    } | awk '$1 ~ /^hide\.me@[A-Za-z0-9_.-]+\.service$/ {print $1}' | sort -u
+)
+CLEANUP_FAILED=0
 
-if [ -n "$ACTIVE_SERVICES" ]; then
-    for service in $ACTIVE_SERVICES; do
+if [ "${#HIDEME_SERVICES[@]}" -gt 0 ]; then
+    for service in "${HIDEME_SERVICES[@]}"; do
         echo "$(tr "   Stoppe $service..." \
         "   Stopping $service..." \
         "   Arrêt de $service..." \
         "   Deteniendo $service..." \
         "   Arresto di $service..." \
         "   A parar $service...")"
-        systemctl stop "$service" 2>/dev/null
-        systemctl disable "$service" 2>/dev/null
+        systemctl stop "$service" 2>/dev/null || CLEANUP_FAILED=1
+        systemctl disable "$service" 2>/dev/null || CLEANUP_FAILED=1
     done
     echo "$(tr "   ✓ Alle Services gestoppt" \
         "   ✓ All services stopped" \
@@ -145,38 +154,55 @@ echo "$(tr "2. Entferne VPN-Routing-Regeln..." \
 # Standard hide.me Routing-Tabelle ist 55555
 ROUTING_TABLE=55555
 
-# Entferne IP-Regeln
-ip rule del table $ROUTING_TABLE 2>/dev/null && echo "$(tr "   ✓ IPv4-Regel entfernt" \
+# Entferne alle IP-Regeln, die genau auf die hide.me-Tabelle zeigen.
+IPV4_RULE_REMOVED=0
+while ip rule del table "$ROUTING_TABLE" 2>/dev/null; do
+    IPV4_RULE_REMOVED=1
+done
+if [ "$IPV4_RULE_REMOVED" -eq 1 ]; then
+    echo "$(tr "   ✓ IPv4-Regel entfernt" \
         "   ✓ IPv4 rule removed" \
         "   ✓ Règle IPv4 supprimée" \
         "   ✓ Regla IPv4 eliminada" \
         "   ✓ Regola IPv4 rimossa" \
-        "   ✓ Regra IPv4 removida")" || echo "$(tr "   • Keine IPv4-Regel gefunden" \
+        "   ✓ Regra IPv4 removida")"
+else
+    echo "$(tr "   • Keine IPv4-Regel gefunden" \
         "   • No IPv4 rule found" \
         "   • Aucune règle IPv4 trouvée" \
         "   • No se encontró ninguna regla IPv4" \
         "   • Nessuna regola IPv4 trovata" \
         "   • Nenhuma regra IPv4 encontrada")"
-ip -6 rule del table $ROUTING_TABLE 2>/dev/null && echo "$(tr "   ✓ IPv6-Regel entfernt" \
+fi
+
+IPV6_RULE_REMOVED=0
+while ip -6 rule del table "$ROUTING_TABLE" 2>/dev/null; do
+    IPV6_RULE_REMOVED=1
+done
+if [ "$IPV6_RULE_REMOVED" -eq 1 ]; then
+    echo "$(tr "   ✓ IPv6-Regel entfernt" \
         "   ✓ IPv6 rule removed" \
         "   ✓ Règle IPv6 supprimée" \
         "   ✓ Regla IPv6 eliminada" \
         "   ✓ Regola IPv6 rimossa" \
-        "   ✓ Regra IPv6 removida")" || echo "$(tr "   • Keine IPv6-Regel gefunden" \
+        "   ✓ Regra IPv6 removida")"
+else
+    echo "$(tr "   • Keine IPv6-Regel gefunden" \
         "   • No IPv6 rule found" \
         "   • Aucune règle IPv6 trouvée" \
         "   • No se encontró ninguna regla IPv6" \
         "   • Nessuna regola IPv6 trovata" \
         "   • Nenhuma regra IPv6 encontrada")"
+fi
 
 # Flush Routing-Tabelle
-ip route flush table $ROUTING_TABLE 2>/dev/null && echo "$(tr "   ✓ IPv4-Routen gelöscht" \
+ip route flush table "$ROUTING_TABLE" 2>/dev/null && echo "$(tr "   ✓ IPv4-Routen gelöscht" \
         "   ✓ IPv4 routes cleared" \
         "   ✓ Routes IPv4 effacées" \
         "   ✓ Rutas IPv4 borradas" \
         "   ✓ Route IPv4 cancellate" \
         "   ✓ Rotas IPv4 limpas")" || true
-ip -6 route flush table $ROUTING_TABLE 2>/dev/null && echo "$(tr "   ✓ IPv6-Routen gelöscht" \
+ip -6 route flush table "$ROUTING_TABLE" 2>/dev/null && echo "$(tr "   ✓ IPv6-Routen gelöscht" \
         "   ✓ IPv6 routes cleared" \
         "   ✓ Routes IPv6 effacées" \
         "   ✓ Rutas IPv6 borradas" \
@@ -262,38 +288,12 @@ if command -v nmcli &> /dev/null; then
 fi
 
 echo
-echo "$(tr "5. Entferne Firewall-Marks..." \
-        "5. Removing firewall marks..." \
-        "5. Suppression des marques du pare-feu..." \
-        "5. Eliminando las marcas del cortafuegos..." \
-        "5. Rimozione dei contrassegni del firewall..." \
-        "5. A remover marcas da firewall...")"
-
-# Prüfe und entferne iptables-Marks falls vorhanden
-if command -v iptables &> /dev/null; then
-    iptables -t mangle -F 2>/dev/null && echo "$(tr "   ✓ iptables-Marks gelöscht" \
-        "   ✓ iptables marks cleared" \
-        "   ✓ Marques iptables effacées" \
-        "   ✓ Marcas iptables borradas" \
-        "   ✓ Contrassegni iptables cancellati" \
-        "   ✓ Marcas iptables limpas")" || echo "$(tr "   • Keine iptables-Marks" \
-        "   • No iptables marks" \
-        "   • Aucune marque iptables" \
-        "   • Sin marcas iptables" \
-        "   • Nessun contrassegno iptables" \
-        "   • Sem marcas iptables")"
-    ip6tables -t mangle -F 2>/dev/null && echo "$(tr "   ✓ ip6tables-Marks gelöscht" \
-        "   ✓ ip6tables marks cleared" \
-        "   ✓ Marques ip6tables effacées" \
-        "   ✓ Marcas ip6tables borradas" \
-        "   ✓ Contrassegni ip6tables cancellati" \
-        "   ✓ Marcas ip6tables limpas")" || echo "$(tr "   • Keine ip6tables-Marks" \
-        "   • No ip6tables marks" \
-        "   • Aucune marque ip6tables" \
-        "   • Sin marcas ip6tables" \
-        "   • Nessun contrassegno ip6tables" \
-        "   • Sem marcas ip6tables")"
-fi
+echo "$(tr "5. Fremde Firewall-Regeln bleiben unverändert." \
+        "5. Unrelated firewall rules are left unchanged." \
+        "5. Les règles de pare-feu sans rapport restent inchangées." \
+        "5. Las reglas de cortafuegos ajenas no se modifican." \
+        "5. Le regole firewall non correlate restano invariate." \
+        "5. As regras de firewall não relacionadas permanecem inalteradas.")"
 
 echo
 echo "$(tr "6. Prüfe und repariere Default-Route..." \
@@ -474,6 +474,35 @@ else
         "   ✓ Sin reglas de rutas problemáticas" \
         "   ✓ Nessuna regola di routing problematica" \
         "   ✓ Sem regras de encaminhamento problemáticas")"
+fi
+
+# Verifiziere den Zustand, statt trotz fehlgeschlagener Befehle Erfolg zu melden.
+if systemctl list-units --type=service --state=active 'hide.me@*.service' \
+        --no-legend --plain 2>/dev/null | grep -q '^hide\.me@'; then
+    CLEANUP_FAILED=1
+fi
+if ip rule show | grep -Eq '\b(lookup|table) 55555\b'; then
+    CLEANUP_FAILED=1
+fi
+if ip -6 rule show | grep -Eq '\b(lookup|table) 55555\b'; then
+    CLEANUP_FAILED=1
+fi
+if [ -n "$(ip route show table "$ROUTING_TABLE" 2>/dev/null)" ] || \
+        [ -n "$(ip -6 route show table "$ROUTING_TABLE" 2>/dev/null)" ]; then
+    CLEANUP_FAILED=1
+fi
+if ip link show vpn &>/dev/null; then
+    CLEANUP_FAILED=1
+fi
+
+if [ "$CLEANUP_FAILED" -ne 0 ]; then
+    echo "$(tr "❌ Reset unvollständig: hide.me-Dienst oder Kill-Switch-Routing ist noch aktiv." \
+        "❌ Reset incomplete: a hide.me service or kill-switch route is still active." \
+        "❌ Réinitialisation incomplète : un service hide.me ou une route kill-switch est encore actif." \
+        "❌ Restablecimiento incompleto: un servicio hide.me o una ruta del kill switch sigue activo." \
+        "❌ Ripristino incompleto: un servizio hide.me o una route kill-switch è ancora attivo." \
+        "❌ Reposição incompleta: um serviço hide.me ou uma rota kill-switch ainda está ativo.")" >&2
+    exit 1
 fi
 
 echo

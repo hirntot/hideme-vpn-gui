@@ -4,7 +4,7 @@ Hide.me VPN Notification Bar / System Tray GUI
 Benutzerfreundliche GUI für hide.me CLI VPN
 """
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 GITHUB_REPO = "hirntot/hideme-vpn-gui"
 
 import os
@@ -98,14 +98,16 @@ from html.parser import HTMLParser
 
 class HideMeVPN:
     """Wrapper für hide.me CLI Befehle"""
-    
+
     HIDEME_DIR = "/opt/hide.me"
     HIDEME_BIN = "/opt/hide.me/hide.me"
     CONFIG_FILE = os.path.expanduser("~/.config/hideme-gui/config.json")
+    ROUTING_TABLE = "55555"
+    SERVICE_PATTERN = re.compile(r'^hide\.me@([A-Za-z0-9_.-]+)\.service$')
     
     def __init__(self):
         self.connected = False
-        self.current_server = None
+        self.current_server = 'nl'
         self.favorite_servers = []
         self.cached_servers = []
         self.load_config()
@@ -162,17 +164,154 @@ class HideMeVPN:
     def is_installed(self):
         """Prüft ob hide.me CLI installiert ist"""
         return os.path.exists(self.HIDEME_BIN)
-    
-    def get_status(self):
-        """Prüft VPN-Status via systemctl"""
+
+    @classmethod
+    def _list_service_units(cls, mode):
+        """Return validated hide.me service instances reported by systemd."""
+        if mode == 'active':
+            command = [
+                'systemctl', 'list-units', '--type=service', '--state=active',
+                '--no-legend', '--plain', 'hide.me@*.service'
+            ]
+        elif mode == 'enabled':
+            command = [
+                'systemctl', 'list-unit-files', '--state=enabled',
+                '--no-legend', '--plain', 'hide.me@*.service'
+            ]
+        else:
+            raise ValueError(f'Unsupported service mode: {mode}')
+
         try:
             result = subprocess.run(
-                ['systemctl', 'is-active', f'hide.me@{self.current_server}'],
-                capture_output=True,
-                text=True,
-                timeout=5
+                command, capture_output=True, text=True, timeout=5, check=False
             )
-            self.connected = (result.stdout.strip() == 'active')
+        except (OSError, subprocess.SubprocessError):
+            return []
+
+        units = []
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if fields and cls.SERVICE_PATTERN.fullmatch(fields[0]):
+                units.append(fields[0])
+        return sorted(set(units))
+
+    @classmethod
+    def active_service_units(cls):
+        return cls._list_service_units('active')
+
+    @classmethod
+    def enabled_service_units(cls):
+        return cls._list_service_units('enabled')
+
+    @classmethod
+    def _delete_table_rules(cls, ipv6=False):
+        """Delete every rule pointing at hide.me's table, without touching others."""
+        base = ['ip'] + (['-6'] if ipv6 else [])
+        for _ in range(32):
+            result = subprocess.run(
+                base + ['rule', 'del', 'table', cls.ROUTING_TABLE],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False, timeout=5
+            )
+            if result.returncode != 0:
+                return
+        raise RuntimeError('Too many routing rules for table 55555')
+
+    @classmethod
+    def cleanup_system_state(cls):
+        """Stop every hide.me unit and remove only hide.me-owned network state."""
+        if os.geteuid() != 0:
+            return False, 'cleanup requires root privileges'
+
+        units = sorted(set(
+            cls.active_service_units() + cls.enabled_service_units()
+        ))
+        failures = []
+        for unit in units:
+            for action in ('stop', 'disable'):
+                result = subprocess.run(
+                    ['systemctl', action, unit], capture_output=True, text=True,
+                    check=False, timeout=30
+                )
+                if result.returncode != 0:
+                    failures.append(f'{action} {unit}')
+
+        active = cls.active_service_units()
+        if active:
+            return False, 'hide.me services still active: ' + ', '.join(active)
+
+        try:
+            cls._delete_table_rules(ipv6=False)
+            cls._delete_table_rules(ipv6=True)
+            subprocess.run(
+                ['ip', 'route', 'flush', 'table', cls.ROUTING_TABLE],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False, timeout=5
+            )
+            subprocess.run(
+                ['ip', '-6', 'route', 'flush', 'table', cls.ROUTING_TABLE],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False, timeout=5
+            )
+            subprocess.run(
+                ['ip', 'link', 'delete', 'vpn'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False, timeout=5
+            )
+            dns_backup = '/etc/resolv.conf.hide.me.backup'
+            if os.path.isfile(dns_backup):
+                dns_restore = subprocess.run(
+                    ['cp', '--', dns_backup, '/etc/resolv.conf'],
+                    capture_output=True, text=True, check=False, timeout=5
+                )
+                if dns_restore.returncode != 0:
+                    failures.append('restore DNS')
+        except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+            return False, str(error)
+
+        residual = []
+        checks = (
+            ('IPv4 rule', ['ip', 'rule', 'show']),
+            ('IPv6 rule', ['ip', '-6', 'rule', 'show']),
+            ('IPv4 route', ['ip', 'route', 'show', 'table', cls.ROUTING_TABLE]),
+            ('IPv6 route', ['ip', '-6', 'route', 'show', 'table', cls.ROUTING_TABLE]),
+        )
+        for label, command in checks:
+            result = subprocess.run(
+                command, capture_output=True, text=True, check=False, timeout=5
+            )
+            output = result.stdout.strip()
+            if ('rule' in label and re.search(r'\b(?:lookup|table)\s+55555\b', output)) \
+                    or ('route' in label and output):
+                residual.append(label)
+
+        link = subprocess.run(
+            ['ip', 'link', 'show', 'vpn'], capture_output=True, text=True,
+            check=False, timeout=5
+        )
+        if link.returncode == 0:
+            residual.append('vpn interface')
+        if failures:
+            residual.extend(failures)
+        if residual:
+            return False, 'cleanup incomplete: ' + ', '.join(residual)
+        return True, 'hide.me services and routing state removed'
+
+    @staticmethod
+    def _cleanup_program():
+        installed = '/usr/local/bin/hideme-vpn-gui'
+        return installed if os.path.exists(installed) else os.path.realpath(sys.argv[0])
+
+    def get_status(self):
+        """Detect every active hide.me instance, including manually started ones."""
+        try:
+            units = self.active_service_units()
+            self.connected = bool(units)
+            if units:
+                match = self.SERVICE_PATTERN.fullmatch(units[0])
+                if match and self.current_server != match.group(1):
+                    self.current_server = match.group(1)
+                    self.save_config()
             return self.connected
         except Exception as e:
             print(tr(
@@ -234,16 +373,13 @@ class HideMeVPN:
     def disconnect(self):
         """Trennt VPN-Verbindung"""
         try:
-            subprocess.run(
-                ['pkexec', 'systemctl', 'stop', f'hide.me@{self.current_server}'],
-                check=True,
-                timeout=30
+            cleanup = subprocess.run(
+                ['pkexec', self._cleanup_program(), '--cleanup-routing'],
+                capture_output=True, text=True, check=False, timeout=90
             )
-            subprocess.run(
-                ['pkexec', 'systemctl', 'disable', f'hide.me@{self.current_server}'],
-                check=True,
-                timeout=30
-            )
+            if cleanup.returncode != 0:
+                detail = cleanup.stderr.strip() or cleanup.stdout.strip()
+                raise RuntimeError(detail or 'routing cleanup failed')
             self.connected = False
             return True, tr(
                 "VPN getrennt",
@@ -274,38 +410,14 @@ class HideMeVPN:
 
     def emergency_reset(self):
         """Setzt hide.me VPN-Reste im System zurück (Notfall-Reset)."""
-        reset_script = r'''
-set +e
-ACTIVE_SERVICES=$(systemctl list-units --type=service --state=active 'hide.me@*' --no-legend | awk '{print $1}')
-if [ -n "$ACTIVE_SERVICES" ]; then
-    for service in $ACTIVE_SERVICES; do
-        systemctl stop "$service" 2>/dev/null
-        systemctl disable "$service" 2>/dev/null
-    done
-fi
-ip rule del table 55555 2>/dev/null
-ip -6 rule del table 55555 2>/dev/null
-ip route flush table 55555 2>/dev/null
-ip -6 route flush table 55555 2>/dev/null
-if ip link show vpn >/dev/null 2>&1; then
-    ip link delete vpn 2>/dev/null
-fi
-if [ -f /etc/resolv.conf.hide.me.backup ]; then
-    cp /etc/resolv.conf.hide.me.backup /etc/resolv.conf 2>/dev/null
-fi
-if command -v iptables >/dev/null 2>&1; then
-    iptables -t mangle -F 2>/dev/null
-fi
-if command -v ip6tables >/dev/null 2>&1; then
-    ip6tables -t mangle -F 2>/dev/null
-fi
-'''
         try:
-            subprocess.run(
-                ['pkexec', 'bash', '-c', reset_script],
-                check=True,
-                timeout=90
+            result = subprocess.run(
+                ['pkexec', self._cleanup_program(), '--cleanup-routing'],
+                capture_output=True, text=True, check=False, timeout=90
             )
+            if result.returncode != 0:
+                detail = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(detail or 'routing cleanup failed')
             self.connected = False
             return True, tr(
                 "Notfall-Reset abgeschlossen. Netzwerk wurde zurückgesetzt.",
@@ -1673,7 +1785,17 @@ def main():
             'Reposição de emergência (encaminhamento/DNS/VPN) via pkexec'
         )
     )
+    parser.add_argument(
+        "--cleanup-routing",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
     args = parser.parse_args()
+
+    if args.cleanup_routing:
+        success, message = HideMeVPN.cleanup_system_state()
+        print(message, file=sys.stdout if success else sys.stderr)
+        sys.exit(0 if success else 1)
 
     if args.emergency_reset:
         vpn = HideMeVPN()

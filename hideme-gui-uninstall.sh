@@ -102,6 +102,26 @@ pkill -f hideme-vpn-gui 2>/dev/null && echo "$(tr "✓ Prozess beendet" \
         "• Nessuna istanza in esecuzione" \
         "• Nenhuma instância em execução")"
 
+# Beende alle hide.me-Instanzen und entferne den Kill-Switch, bevor die
+# PolicyKit-Regel und das GUI-Programm verschwinden.
+if [ -x /usr/local/bin/hideme-vpn-gui ]; then
+    echo "$(tr "Bereinige hide.me-Dienste und Routing..." \
+        "Cleaning up hide.me services and routing..." \
+        "Nettoyage des services hide.me et du routage..." \
+        "Limpiando los servicios hide.me y las rutas..." \
+        "Pulizia dei servizi hide.me e del routing..." \
+        "A limpar serviços hide.me e encaminhamento...")"
+    if ! /usr/local/bin/hideme-vpn-gui --cleanup-routing; then
+        echo "$(tr "❌ Netzwerk-Bereinigung fehlgeschlagen. Deinstallation abgebrochen." \
+        "❌ Network cleanup failed. Uninstallation cancelled." \
+        "❌ Échec du nettoyage réseau. Désinstallation annulée." \
+        "❌ Error al limpiar la red. Desinstalación cancelada." \
+        "❌ Pulizia della rete non riuscita. Disinstallazione annullata." \
+        "❌ Falha na limpeza da rede. Desinstalação cancelada.")" >&2
+        exit 1
+    fi
+fi
+
 # 2. Entferne PolicyKit-Regel
 echo "$(tr "Entferne PolicyKit-Regel..." \
         "Removing PolicyKit rule..." \
@@ -258,12 +278,12 @@ echo "$(tr "• Hide.me CLI (/opt/hide.me) wurde NICHT entfernt" \
         "• Hide.me CLI (/opt/hide.me) NO se ha eliminado" \
         "• Hide.me CLI (/opt/hide.me) NON è stato rimosso" \
         "• Hide.me CLI (/opt/hide.me) NÃO foi removido")"
-echo "$(tr "• VPN-Verbindungen müssen manuell getrennt werden falls aktiv" \
-        "• Active VPN connections must be disconnected manually" \
-        "• Les connexions VPN actives doivent être déconnectées manuellement" \
-        "• Las conexiones VPN activas deben desconectarse manualmente" \
-        "• Le connessioni VPN attive devono essere disconnesse manualmente" \
-        "• As ligações VPN ativas devem ser desligadas manualmente")"
+echo "$(tr "• hide.me-Dienste und Kill-Switch-Routing wurden entfernt" \
+        "• hide.me services and kill-switch routing were removed" \
+        "• Les services hide.me et le routage kill-switch ont été supprimés" \
+        "• Se eliminaron los servicios hide.me y las rutas del kill switch" \
+        "• I servizi hide.me e il routing kill-switch sono stati rimossi" \
+        "• Os serviços hide.me e o encaminhamento kill-switch foram removidos")"
 echo "$(tr "• Bei Bedarf hide.me CLI mit: sudo /opt/hide.me/uninstall.sh" \
         "• To uninstall hide.me CLI if needed: sudo /opt/hide.me/uninstall.sh" \
         "• Pour désinstaller hide.me CLI : sudo /opt/hide.me/uninstall.sh" \

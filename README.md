@@ -27,6 +27,8 @@
 - **Best Location**: Auto-select fastest reachable server
 - **Favorites Menu**: Save commonly used servers for quick reconnect
 - **Emergency Reset Everywhere**: Available in menu, dialog, and CLI (`--emergency-reset`)
+- **Kill-Switch Recovery**: Detects all hide.me instances and removes verified
+  stale rules/routes from hide.me routing table `55555`
 - **Update Check on Startup**: Background GitHub release/tag check
 - **Live Status Display**: Visual connection status in icon and tooltip
 - **Desktop Notifications**: Connection feedback via libnotify
@@ -162,6 +164,12 @@ hideme-vpn-gui --emergency-reset
 # Or run standalone script
 sudo ./hideme-emergency-reset.sh
 ```
+
+Disconnect and emergency reset stop all active or enabled `hide.me@*.service`
+instances, then remove only rules and routes that point to hide.me routing
+table `55555`. The reset verifies that no hide.me service, table-55555 rule,
+table-55555 route or `vpn` interface remains. It returns an error if cleanup is
+incomplete and does not flush unrelated firewall tables.
 
 ### GUI not starting
 

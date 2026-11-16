@@ -8,11 +8,18 @@ polkit.addRule(function(action, subject) {
         var program = action.lookup("program");
         var commandLine = action.lookup("command_line");
         
-        // Erlaube systemctl für hide.me@*.service
+        // Erlaube nur start/stop/enable/disable für hide.me@*.service
         if (program == "/usr/bin/systemctl" || program == "/bin/systemctl") {
-            if (commandLine && commandLine.match(/hide\.me@\w+/)) {
+            if (commandLine && commandLine.match(
+                    /^(?:(?:\/(?:usr\/)?bin\/)?systemctl )?(?:start|stop|enable|disable) hide\.me@[A-Za-z0-9_.-]+(?:\.service)?$/)) {
                 return polkit.Result.YES;
             }
+        }
+
+        // Root-eigenes GUI darf ausschließlich den geprüften Cleanup-Modus starten.
+        if (program == "/usr/local/bin/hideme-vpn-gui" && commandLine &&
+            commandLine.match(/^(?:\/usr\/local\/bin\/hideme-vpn-gui )?--cleanup-routing$/)) {
+            return polkit.Result.YES;
         }
     }
 });

@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## [1.1.1] - 2026-11-16
+
+### Fixed
+
+- Detect all active hide.me service instances instead of checking only the
+  last selected server.
+- Stop and disable every active or enabled hide.me instance on disconnect and
+  uninstall.
+- Remove and verify stale IPv4/IPv6 rules and routes for hide.me routing table
+  `55555`, preventing a leftover kill switch from blocking network traffic.
+- Report cleanup failures instead of claiming that reset succeeded.
+- Preserve unrelated firewall rules; emergency reset no longer flushes the
+  system-wide iptables/ip6tables mangle tables.
+
+## [1.1.0] - 2026-09-13
 
 - Fix #1: translate GUI, notifications and setup/reset/removal prompts into
   English, French, Spanish, Italian and Portuguese while retaining German.
@@ -9,11 +27,6 @@
 - Localize confirmation keys, desktop descriptions and server names; invalidate
   cached server lists when the language changes.
 - Add regression tests for locale selection, confirmations and translation data.
-
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.0.0] - 2026-02-17
 

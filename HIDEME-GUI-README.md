@@ -1,5 +1,14 @@
 # Hide.me VPN GUI - Benutzerfreundliche Oberfläche
 
+## Sicheres Aufräumen des Kill-Switches
+
+Beim Trennen und Deinstallieren werden alle aktiven oder aktivierten
+`hide.me@*.service`-Instanzen berücksichtigt. Anschließend entfernt das GUI
+gezielt IPv4-/IPv6-Regeln und Routen der hide.me-Routing-Tabelle `55555` und
+prüft, ob Dienste, Regeln, Routen oder das `vpn`-Interface übrig geblieben sind.
+Ein unvollständiger Reset wird als Fehler gemeldet. Fremde Firewall-Regeln
+werden nicht geleert oder verändert.
+
 ## Sprache
 
 GUI und Hilfsskripte unterstützen Deutsch, Englisch, Französisch, Spanisch,
